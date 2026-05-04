@@ -19,7 +19,7 @@ const envSchema = z.object({
   STRIPE_WEBHOOK_SECRET: z
     .string()
     .min(1, "STRIPE_WEBHOOK_SECRET is required"),
-  FRONTEND_DOMAIN: z.string().default("http://localhost:3000"),
+  FRONTEND_URL: z.string().default("http://localhost:3000"),
 
   FIREBASE_SERVICE_ACCOUNT_JSON: z.string().optional(),
 });

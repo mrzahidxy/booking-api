@@ -18,6 +18,12 @@ const getBookingKind = (booking: { roomId: number | null; restaurantId: number |
   throw new BadRequestException("Booking type could not be determined", ErrorCode.BAD_REQUEST);
 };
 
+const withPaymentStatus = <T extends { payment?: { status: string }[] }>(bookings: T[]) =>
+  bookings.map((booking) => ({
+    ...booking,
+    paymentStatus: booking.payment?.[0]?.status ?? "UNPAID",
+  }));
+
 export const fetchUserBookings = async (params: {
   userId?: number;
   page?: number;
@@ -31,7 +37,12 @@ export const fetchUserBookings = async (params: {
     skip,
     take: limit,
     where: { userId: params.userId },
+    orderBy: { createdAt: "desc" },
     include: {
+      payment: {
+        orderBy: { createdAt: "desc" },
+        take: 1,
+      },
       room: { include: { hotel: true } },
       restaurant: true,
       user: true,
@@ -46,7 +57,7 @@ export const fetchUserBookings = async (params: {
   }
 
   const formattedResponse = formatPaginationResponse(
-    bookings,
+    withPaymentStatus(bookings),
     totalBookings,
     page,
     limit
@@ -71,6 +82,10 @@ export const fetchBookings = async (params: { page?: number; limit?: number }) =
       take: limit,
       orderBy: { createdAt: "desc" },
       include: {
+        payment: {
+          orderBy: { createdAt: "desc" },
+          take: 1,
+        },
         room: { include: { hotel: true } },
         restaurant: true,
         user: true,
@@ -83,7 +98,7 @@ export const fetchBookings = async (params: { page?: number; limit?: number }) =
   }
 
   const formattedResponse = formatPaginationResponse(
-    bookings,
+    withPaymentStatus(bookings),
     totalBookings,
     page,
     limit
