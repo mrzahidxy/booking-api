@@ -4,6 +4,7 @@ import { UnauthorizedException } from "../exceptions/unauthorized";
 import { ErrorCode } from "../exceptions/root";
 import env from "../utils/env";
 import prisma from "../utils/prisma";
+import { buildTenantMembership } from "../utils/tenant-access";
 
 export const authMiddleware = async (
   req: Request,
@@ -36,6 +37,12 @@ export const authMiddleware = async (
             },
           },
         },
+        tenantMemberships: {
+          take: 1,
+          include: {
+            tenant: true,
+          },
+        },
       },
     });
 
@@ -50,12 +57,20 @@ export const authMiddleware = async (
 
     const permissions =
       user.role?.rolePermission?.map((rp) => rp.permission.name) ?? [];
+    const { tenantMemberships: _tenantMemberships, ...baseUser } = user;
+
+    const tenantMembership = buildTenantMembership(user.tenantMemberships[0]);
 
     req.userPermissions = new Set(permissions);
-    req.user = { ...user, role: user.role ?? undefined };
+    req.user = {
+      ...baseUser,
+      role: user.role ?? undefined,
+      tenantMembership,
+    };
 
     return next();
   } catch (_error) {
+    console.error("Authentication error:", _error);
     return next(
       new UnauthorizedException(
         "Invalid token",

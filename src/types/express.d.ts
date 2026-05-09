@@ -1,5 +1,6 @@
-import { User } from "@prisma/client";
 import express from "express";
+import type { TenantMembership } from "../utils/tenant-access";
+import { User } from "@prisma/client";
 
 
 // declare module 'express'{
@@ -17,6 +18,7 @@ declare global {
             name: string;
             rolePermission?: { permission: { name: string } }[];
           };
+          tenantMembership?: TenantMembership;
         }; // Add this line to declare the user property
         userPermissions?: Set<string>;
       }
