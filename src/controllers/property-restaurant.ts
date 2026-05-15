@@ -4,59 +4,63 @@ import { handleValidationError } from "../utils/common-method";
 import { restaurantSchema } from "../schemas/restaurant";
 import {
   checkTableAvailabilityService,
-  createRestaurantService,
   fetchRestaurantDetailsService,
   fetchRestaurantsService,
+  removeRestaurant,
   reserveTableService,
   searchRestaurantsService,
-  updateRestaurantService,
+  upsertRestaurant,
 } from "../services/restaurant.service";
+import { resolveTenantId } from "../utils/tenant-access";
 
 
-export const createRestaurant = async (req: Request, res: Response) => {
+export const createUpdateRestaurant = async (req: Request, res: Response) => {
   const validation = restaurantSchema.safeParse(req.body);
   if (!validation.success) return handleValidationError(res, validation);
   const { name, location, cuisine, seats, menu, image, description } = validation.data;
+  const restaurantId = req.params.id ? +req.params.id : null;
+  const tenantId = resolveTenantId(req, { requireTenant: true });
 
-  const response = await createRestaurantService({
-    name,
-    location,
-    cuisine,
-    seats,
-    menu,
-    image,
-    description,
-  });
-  res.json(response);
-};
+  if (!tenantId) {
+    return res.status(400).json({ message: "Tenant context required" });
+  }
 
-export const updateRestaurant = async (req: Request, res: Response) => {
-  const restaurantId = +req.params.id;
-  const { name, location, cuisine, seats, menu, timeSlots, description, image } = req.body;
-
-  const response = await updateRestaurantService({
+  const response = await upsertRestaurant({
     restaurantId,
-    payload: {
+    tenantId,
+    data: {
       name,
       location,
       cuisine,
-      seats: seats ? +seats : undefined,
+      seats,
       menu,
-      description,
       image,
-      timeSlots,
+      description,
     },
   });
+  return res.status(response.statusCode).json(response);
+};
 
-  res.json(response);
+export const deleteRestaurant = async (req: Request, res: Response) => {
+  const restaurantId = +req.params.id;
+  const tenantId = resolveTenantId(req, { requireTenant: true });
+
+  if (!tenantId) {
+    return res.status(400).json({ message: "Tenant context required" });
+  }
+
+  const response = await removeRestaurant(restaurantId, tenantId);
+  return res.status(response.statusCode).json(response);
 };
 
 export const getAllRestaurants = async (req: Request, res: Response) => {
   const { page = 1, limit = 10 } = req.query;
+  const tenantId = resolveTenantId(req);
 
   const response = await fetchRestaurantsService({
     page: +page,
     limit: +limit,
+    tenantId,
   });
   res.status(response.statusCode).json(response);
 };
@@ -66,6 +70,7 @@ export const getAllRestaurants = async (req: Request, res: Response) => {
 export const searchRestaurants = async (req: Request, res: Response) => {
   // Validate and parse query parameters
   const { name, location, ratings, cuisine, page = 1, limit = 10 } = req.query;
+  const tenantId = resolveTenantId(req);
 
   const response = await searchRestaurantsService({
     name: name as string | undefined,
@@ -74,6 +79,7 @@ export const searchRestaurants = async (req: Request, res: Response) => {
     cuisine: cuisine as string | undefined,
     page: parseInt(page as string, 10),
     limit: parseInt(limit as string, 10),
+    tenantId,
   });
   return res.status(response.statusCode).json(response);
 };
@@ -81,9 +87,10 @@ export const searchRestaurants = async (req: Request, res: Response) => {
 
 // // Get Detailed Restaurant Information
 export const getRestaurantDetails = async (req: Request, res: Response) => {
-  const restaurantId = +req.params.id;
+  const restaurantIdentifier = req.params.id;
+  const tenantId = resolveTenantId(req);
 
-  const response = await fetchRestaurantDetailsService(restaurantId);
+  const response = await fetchRestaurantDetailsService(restaurantIdentifier, tenantId);
   res.status(response.statusCode).json(response);
 };
 
@@ -93,7 +100,8 @@ export const checkTableAvailability = async (
   res: Response
 ): Promise<Response> => {
   // Extract query parameters
-  const { restaurantId, date, partySize, timeSlot } = req.query as {
+  const { propertyId, restaurantId, date, partySize, timeSlot } = req.query as {
+    propertyId?: string;
     restaurantId: string;
     date: string;
     timeSlot: string;
@@ -101,7 +109,7 @@ export const checkTableAvailability = async (
   };
 
   const response = await checkTableAvailabilityService({
-    restaurantId: restaurantId ? +restaurantId : undefined,
+    restaurantId: propertyId ? +propertyId : restaurantId ? +restaurantId : undefined,
     date,
     partySize: partySize ? Number(partySize) : undefined,
     timeSlot,
@@ -118,12 +126,17 @@ export const reserveTable = async (req: Request, res: Response) => {
     return handleValidationError(res, validationResult);
   }
 
-  const { restaurantId, bookingDate, partySize, timeSlot } =
+  const { propertyId, restaurantId, bookingDate, partySize, timeSlot } =
     validationResult.data;
+  const resolvedRestaurantId = propertyId ?? restaurantId;
+
+  if (!resolvedRestaurantId) {
+    return res.status(400).json({ message: "propertyId is required" });
+  }
 
   const response = await reserveTableService({
     userId: req.user?.id,
-    restaurantId,
+    restaurantId: resolvedRestaurantId,
     bookingDate: new Date(bookingDate),
     partySize,
     timeSlot,
