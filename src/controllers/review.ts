@@ -5,32 +5,48 @@ import {
   getReviewsService,
   updateReviewService,
 } from "../services/review.service";
+import { reviewCreateSchema, reviewQuerySchema, reviewUpdateSchema } from "../schemas/review";
+import { UnauthorizedException } from "../exceptions/unauthorized";
+import { ErrorCode } from "../exceptions/root";
+import { handleValidationError } from "../utils/common-method";
 
 export const getReviews = async (req: Request, res: Response) => {
-  const { page = 1, limit = 10, hotelId, restaurantId } = req.query;
+  const validation = reviewQuerySchema.safeParse(req.query);
+  if (!validation.success) {
+    return res.status(400).json({ message: "Invalid review query" });
+  }
+
+  const { page, limit, propertyId, hotelId, restaurantId } = validation.data;
+  const resolvedPropertyId = propertyId ?? hotelId ?? restaurantId;
 
   const response = await getReviewsService({
-    page: Number(page),
-    limit: Number(limit),
-    hotelId: hotelId ? Number(hotelId) : undefined,
-    restaurantId: restaurantId ? Number(restaurantId) : undefined,
+    page,
+    limit,
+    propertyId: resolvedPropertyId ? Number(resolvedPropertyId) : undefined,
   });
   res.status(response.statusCode).json(response);
 };
 
 export const createReview = async (req: Request, res: Response) => {
-  const { userId, hotelId, restaurantId, rating, review } = req.body;
+  if (!req.user?.id) {
+    throw new UnauthorizedException("User not authenticated", ErrorCode.NO_AUTHORIZED);
+  }
 
-  if (!hotelId && !restaurantId) {
-    return res.status(400).json({
-      message: "Review must be associated with either a hotel or a restaurant.",
-    });
+  const validation = reviewCreateSchema.safeParse(req.body);
+  if (!validation.success) {
+    return handleValidationError(res, validation);
+  }
+
+  const { propertyId, hotelId, restaurantId, rating, review } = validation.data;
+  const resolvedPropertyId = propertyId ?? hotelId ?? restaurantId;
+
+  if (!resolvedPropertyId) {
+    return res.status(400).json({ message: "Review must target a property." });
   }
 
   const response = await createReviewService({
-    userId,
-    hotelId,
-    restaurantId,
+    userId: req.user.id,
+    propertyId: resolvedPropertyId,
     rating,
     review,
   });
@@ -39,11 +55,22 @@ export const createReview = async (req: Request, res: Response) => {
 };
 
 export const updateReview = async (req: Request, res: Response) => {
+  if (!req.user?.id) {
+    throw new UnauthorizedException("User not authenticated", ErrorCode.NO_AUTHORIZED);
+  }
+
   const reviewId = +req.params.id;
-  const { rating, review } = req.body;
+  const validation = reviewUpdateSchema.safeParse(req.body);
+
+  if (!validation.success) {
+    return handleValidationError(res, validation);
+  }
+
+  const { rating, review } = validation.data;
 
   const response = await updateReviewService({
     reviewId,
+    userId: req.user.id,
     rating,
     review,
   });
@@ -52,9 +79,13 @@ export const updateReview = async (req: Request, res: Response) => {
 };
 
 export const deleteReview = async (req: Request, res: Response) => {
+  if (!req.user?.id) {
+    throw new UnauthorizedException("User not authenticated", ErrorCode.NO_AUTHORIZED);
+  }
+
   const reviewId = +req.params.id;
 
-  const response = await deleteReviewService(reviewId);
+  const response = await deleteReviewService(reviewId, req.user.id);
 
   res.status(response.statusCode).json(response);
 };
