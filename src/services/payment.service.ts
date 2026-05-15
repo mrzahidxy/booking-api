@@ -1,3 +1,4 @@
+import { BookingStatus, PaymentStatus, PropertyKind } from "@prisma/client";
 import Stripe from "stripe";
 import { getStripe } from "./stripe.service";
 import prisma from "../utils/prisma";
@@ -8,7 +9,8 @@ const BDT_CURRENCY = "bdt";
 export const createCheckoutSessionService = async (
   bookingId: number,
   domain: string,
-  userId?: number
+  userId?: number,
+  tenantId?: number | null
 ) => {
   const booking = await prisma.booking.findUnique({
     where: {
@@ -16,6 +18,7 @@ export const createCheckoutSessionService = async (
     },
     include: {
       payment: true,
+      property: true,
     },
   });
 
@@ -23,8 +26,12 @@ export const createCheckoutSessionService = async (
     return { statusCode: 404, body: { message: "Booking not found" } };
   }
 
-  const isHotelBooking = !!booking.roomId && !booking.restaurantId;
-  const isRestaurantBooking = !!booking.restaurantId && !booking.roomId;
+  if (tenantId && booking.tenantId !== tenantId) {
+    return { statusCode: 403, body: { message: "You cannot pay for this booking" } };
+  }
+
+  const isHotelBooking = booking.property.kind === PropertyKind.HOTEL;
+  const isRestaurantBooking = booking.property.kind === PropertyKind.RESTAURANT;
 
   if (!isHotelBooking && !isRestaurantBooking) {
     return {
@@ -37,7 +44,7 @@ export const createCheckoutSessionService = async (
     return { statusCode: 403, body: { message: "You cannot pay for this booking" } };
   }
 
-  if (booking.status !== "PENDING") {
+  if (booking.status !== BookingStatus.PENDING) {
     return {
       statusCode: 409,
       body: { message: "This booking is not payable" },
@@ -45,7 +52,7 @@ export const createCheckoutSessionService = async (
   }
 
   const hasSucceededPayment = booking.payment.some(
-    (payment) => payment.status === "SUCCEEDED"
+    (payment) => payment.status === PaymentStatus.SUCCEEDED
   );
 
   if (hasSucceededPayment) {
@@ -59,7 +66,7 @@ export const createCheckoutSessionService = async (
   const existingPendingPayment = booking.payment
     .slice()
     .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
-    .find((payment) => payment.status === "PENDING");
+    .find((payment) => payment.status === PaymentStatus.PENDING);
 
   if (existingPendingPayment?.stripeSessionId) {
     const existingSession = await stripe.checkout.sessions.retrieve(
@@ -69,7 +76,7 @@ export const createCheckoutSessionService = async (
     if (existingSession.status === "expired") {
       await prisma.payment.update({
         where: { stripeSessionId: existingPendingPayment.stripeSessionId },
-        data: { status: "FAILED" },
+        data: { status: PaymentStatus.FAILED },
       });
     } else {
       return {
@@ -106,16 +113,18 @@ export const createCheckoutSessionService = async (
     metadata: {
       bookingId: booking?.id.toString() as string,
       userId: booking.userId.toString(),
+      ...(booking.tenantId ? { tenantId: booking.tenantId.toString() } : {}),
     },
     client_reference_id: booking?.id.toString(),
   });
 
   await prisma.payment.create({
     data: {
+      tenantId: booking.tenantId,
       bookingId,
       amount: amount,
       currency: BDT_CURRENCY,
-      status: "PENDING",
+      status: PaymentStatus.PENDING,
       stripeSessionId: session.id,
     },
   });
@@ -124,12 +133,12 @@ export const createCheckoutSessionService = async (
     statusCode: 200,
     body: {
       sessionId: session.id,
-      paymentStatus: "PENDING",
+      paymentStatus: PaymentStatus.PENDING,
     },
   };
 };
 
-export const getCheckoutSessionService = async (sessionId: string, userId?: number) => {
+export const getCheckoutSessionService = async (sessionId: string, userId?: number, tenantId?: number | null) => {
   const payment = await prisma.payment.findUnique({
     where: {
       stripeSessionId: sessionId,
@@ -143,6 +152,10 @@ export const getCheckoutSessionService = async (sessionId: string, userId?: numb
     return { statusCode: 404, body: { message: "Payment not found" } };
   }
 
+  if (tenantId && payment.booking.tenantId !== tenantId) {
+    return { statusCode: 403, body: { message: "You cannot view this payment" } };
+  }
+
   if (userId && payment.booking.userId !== userId) {
     return { statusCode: 403, body: { message: "You cannot view this payment" } };
   }
@@ -152,13 +165,13 @@ export const getCheckoutSessionService = async (sessionId: string, userId?: numb
 
   if (
     session.payment_status === "paid" &&
-    payment.status !== "SUCCEEDED"
+    payment.status !== PaymentStatus.SUCCEEDED
   ) {
     await prisma.$transaction(async (tx) => {
       await tx.payment.update({
         where: { stripeSessionId: sessionId },
         data: {
-          status: "SUCCEEDED",
+          status: PaymentStatus.SUCCEEDED,
           stripePaymentIntentId: session.payment_intent as string,
         },
       });
@@ -172,11 +185,11 @@ export const getCheckoutSessionService = async (sessionId: string, userId?: numb
 
   if (
     session.status === "expired" &&
-    payment.status === "PENDING"
+    payment.status === PaymentStatus.PENDING
   ) {
     await prisma.payment.update({
       where: { stripeSessionId: sessionId },
-      data: { status: "FAILED" },
+      data: { status: PaymentStatus.FAILED },
     });
   }
 
@@ -218,7 +231,7 @@ export const handleStripeWebhookEvent = async (payload: Buffer, signature: strin
       const payment = await tx.payment.update({
         where: { stripeSessionId: session.id },
         data: {
-          status: "SUCCEEDED",
+          status: PaymentStatus.SUCCEEDED,
           stripePaymentIntentId: session.payment_intent as string,
         },
       });
@@ -238,10 +251,10 @@ export const handleStripeWebhookEvent = async (payload: Buffer, signature: strin
     await prisma.payment.updateMany({
       where: {
         stripeSessionId: session.id,
-        status: "PENDING",
+        status: PaymentStatus.PENDING,
       },
       data: {
-        status: "FAILED",
+        status: PaymentStatus.FAILED,
       },
     });
   }
@@ -249,7 +262,7 @@ export const handleStripeWebhookEvent = async (payload: Buffer, signature: strin
   return event;
 };
 
-export const cancelCheckoutSessionService = async (bookingId: number, userId?: number) => {
+export const cancelCheckoutSessionService = async (bookingId: number, userId?: number, tenantId?: number | null) => {
   const booking = await prisma.booking.findUnique({
     where: { id: bookingId },
     include: {
@@ -263,11 +276,15 @@ export const cancelCheckoutSessionService = async (bookingId: number, userId?: n
     return { statusCode: 404, body: { message: "Booking not found" } };
   }
 
+  if (tenantId && booking.tenantId !== tenantId) {
+    return { statusCode: 403, body: { message: "You cannot update this booking" } };
+  }
+
   if (userId && booking.userId !== userId) {
     return { statusCode: 403, body: { message: "You cannot update this booking" } };
   }
 
-  const pendingPayment = booking.payment.find((payment) => payment.status === "PENDING");
+  const pendingPayment = booking.payment.find((payment) => payment.status === PaymentStatus.PENDING);
 
   if (!pendingPayment) {
     return {
@@ -282,7 +299,7 @@ export const cancelCheckoutSessionService = async (bookingId: number, userId?: n
 
   const updatedPayment = await prisma.payment.update({
     where: { stripeSessionId: pendingPayment.stripeSessionId },
-    data: { status: "FAILED" },
+    data: { status: PaymentStatus.FAILED },
   });
 
   return {

@@ -4,7 +4,7 @@ import { formatPaginationResponse } from "../utils/common-method";
 import { NotFoundException } from "../exceptions/not-found";
 import { ErrorCode } from "../exceptions/root";
 import { BadRequestException } from "../exceptions/bad-request";
-import { TenantMemberRole } from "@prisma/client";
+import { PaymentStatus, TenantMemberRole } from "@prisma/client";
 import { buildTenantWhere } from "../utils/tenant-access";
 import { resolveUniqueSlug } from "../utils/slug";
 
@@ -158,7 +158,10 @@ export const getAdminDashboardStatsService = async (tenantId?: number | null) =>
       orderBy: { status: "asc" },
     }),
     prisma.payment.aggregate({
-      where: tenantWhere,
+      where: {
+        ...tenantWhere,
+        status: PaymentStatus.SUCCEEDED,
+      },
       _sum: { amount: true },
     }),
   ]);
@@ -194,7 +197,7 @@ export const getAdminDashboardStatsService = async (tenantId?: number | null) =>
     },
     bookingsByStatus,
     paymentsByStatus,
-    revenue: paymentTotals._sum.amount ?? 0,
+    revenue: (paymentTotals._sum.amount ?? 0) / 100,
   });
 };
 

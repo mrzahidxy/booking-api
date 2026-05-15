@@ -1,4 +1,4 @@
-import { BookingStatus } from "@prisma/client";
+import { BookingStatus, PropertyKind } from "@prisma/client";
 import { BadRequestException } from "../exceptions/bad-request";
 import { NotFoundException } from "../exceptions/not-found";
 import { ErrorCode } from "../exceptions/root";
@@ -6,15 +6,13 @@ import { HTTPSuccessResponse } from "../helpers/success-response";
 import prisma from "../utils/prisma";
 import { formatPaginationResponse } from "../utils/common-method";
 import { getMessaging } from "./firebase-admin.service";
+import { buildTenantWhere } from "../utils/tenant-access";
 
 type BookingKind = "room" | "restaurant";
 
-const getBookingKind = (booking: { roomId: number | null; restaurantId: number | null }): BookingKind => {
-  if (booking.roomId && booking.restaurantId) {
-    throw new BadRequestException("Booking is ambiguous (both room and restaurant set)", ErrorCode.BAD_REQUEST);
-  }
-  if (booking.roomId) return "room";
-  if (booking.restaurantId) return "restaurant";
+const getBookingKind = (booking: { property: { kind: PropertyKind } }): BookingKind => {
+  if (booking.property.kind === PropertyKind.HOTEL) return "room";
+  if (booking.property.kind === PropertyKind.RESTAURANT) return "restaurant";
   throw new BadRequestException("Booking type could not be determined", ErrorCode.BAD_REQUEST);
 };
 
@@ -43,8 +41,8 @@ export const fetchUserBookings = async (params: {
         orderBy: { createdAt: "desc" },
         take: 1,
       },
-      room: { include: { hotel: true } },
-      restaurant: true,
+      room: { include: { property: true } },
+      property: true,
       user: true,
     },
   });
@@ -70,31 +68,33 @@ export const fetchUserBookings = async (params: {
   );
 };
 
-export const fetchBookings = async (params: { page?: number; limit?: number }) => {
+export const fetchBookings = async (params: { page?: number; limit?: number; tenantId?: number | null }) => {
   const page = params.page ?? 1;
   const limit = params.limit ?? 10;
   const skip = (page - 1) * limit;
+  const whereClause = buildTenantWhere(params.tenantId);
 
   const [totalBookings, bookings] = await prisma.$transaction([
-    prisma.booking.count(),
+    prisma.booking.count({ where: whereClause }),
     prisma.booking.findMany({
       skip,
       take: limit,
+      where: whereClause,
       orderBy: { createdAt: "desc" },
       include: {
         payment: {
           orderBy: { createdAt: "desc" },
           take: 1,
         },
-        room: { include: { hotel: true } },
-        restaurant: true,
+        room: { include: { property: true } },
+        property: true,
         user: true,
       },
     }),
   ]);
 
   if (!bookings) {
-    throw new NotFoundException("No hotels found", ErrorCode.ROLE_NOT_FOUND);
+    throw new NotFoundException("No bookings found", ErrorCode.ROLE_NOT_FOUND);
   }
 
   const formattedResponse = formatPaginationResponse(
@@ -104,24 +104,30 @@ export const fetchBookings = async (params: { page?: number; limit?: number }) =
     limit
   );
 
-  return new HTTPSuccessResponse("Hotels fetched successfully", 200, formattedResponse);
+  return new HTTPSuccessResponse("Bookings fetched successfully", 200, formattedResponse);
 };
 
 export const updateBookingStatus = async (params: {
   bookingId: number;
   status: BookingStatus;
+  tenantId?: number | null;
 }) => {
-  const { bookingId, status } = params;
+  const { bookingId, status, tenantId } = params;
 
   const updatedBooking = await prisma.$transaction(async (tx) => {
     const existingBooking = await tx.booking.findUnique({
       where: { id: bookingId },
       include: {
         user: true,
+        property: true,
       },
     });
 
     if (!existingBooking) {
+      throw new NotFoundException("Booking not found", ErrorCode.BOOKING_NOT_FOUND);
+    }
+
+    if (tenantId && existingBooking.tenantId !== tenantId) {
       throw new NotFoundException("Booking not found", ErrorCode.BOOKING_NOT_FOUND);
     }
 
@@ -143,6 +149,7 @@ export const updateBookingStatus = async (params: {
             roomId: existingBooking.roomId!,
             bookingDate: existingBooking.bookingDate,
             status: "CONFIRMED",
+            ...buildTenantWhere(tenantId),
           },
           _sum: {
             roomQuantity: true,
@@ -159,21 +166,13 @@ export const updateBookingStatus = async (params: {
       }
 
       if (bookingKind === "restaurant") {
-        const restaurant = await tx.restaurant.findUnique({
-          where: { id: existingBooking.restaurantId! },
-          select: { seats: true },
-        });
-
-        if (!restaurant) {
-          throw new NotFoundException("Restaurant not found", ErrorCode.RESTAURANT_NOT_FOUND);
-        }
-
-        const seatAvailable = restaurant.seats!;
+        const seatAvailable = existingBooking.property.seats!;
         const seatBooked = await tx.booking.aggregate({
           where: {
-            restaurantId: existingBooking.restaurantId!,
+            propertyId: existingBooking.propertyId,
             bookingDate: existingBooking.bookingDate,
             status: "CONFIRMED",
+            ...buildTenantWhere(tenantId),
           },
           _sum: {
             partySize: true,
@@ -195,7 +194,7 @@ export const updateBookingStatus = async (params: {
       data: { status },
     });
 
-    await prisma.notification.create({
+    await tx.notification.create({
       data: {
         userId: existingBooking.userId,
         title: "Booking status updated",
@@ -240,17 +239,29 @@ export const createRoomBooking = async (params: {
   roomId: number;
   bookingDate: Date;
   quantity: number;
+  tenantId?: number | null;
 }) => {
-  const { userId, roomId, bookingDate, quantity } = params;
+  const { userId, roomId, bookingDate, quantity, tenantId } = params;
 
   const booking = await prisma.$transaction(async (tx) => {
     const room = await tx.room.findUnique({
       where: { id: roomId },
+      include: { property: true },
     });
 
     if (!room) {
       throw new NotFoundException("Room not found", ErrorCode.ROOM_NOT_FOUND);
     }
+
+    if (tenantId != null && room.property?.tenantId !== tenantId) {
+      throw new NotFoundException("Room not found", ErrorCode.ROOM_NOT_FOUND);
+    }
+
+    if (room.property.kind !== PropertyKind.HOTEL) {
+      throw new BadRequestException("Room booking is only available for hotel properties", ErrorCode.BAD_REQUEST);
+    }
+
+    const resolvedTenantId = tenantId ?? room.property?.tenantId ?? null;
 
     const requestedQuantity = Number(quantity);
     if (requestedQuantity < 1) {
@@ -262,6 +273,7 @@ export const createRoomBooking = async (params: {
         roomId,
         bookingDate,
         status: "CONFIRMED",
+        ...buildTenantWhere(resolvedTenantId),
       },
       _sum: {
         roomQuantity: true,
@@ -283,6 +295,8 @@ export const createRoomBooking = async (params: {
     return tx.booking.create({
       data: {
         userId,
+        tenantId: resolvedTenantId,
+        propertyId: room.propertyId,
         roomId,
         bookingDate,
         totalPrice,
