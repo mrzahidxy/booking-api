@@ -6,6 +6,7 @@ import { ErrorCode } from "../exceptions/root";
 import { NotFoundException } from "../exceptions/not-found";
 import { HTTPSuccessResponse } from "../helpers/success-response";
 import env from "../utils/env";
+import { buildTenantMembership } from "../utils/tenant-access";
 
 export const signupUser = async (payload: {
   email: string;
@@ -59,6 +60,31 @@ export const loginUser = async (payload: { email: string; password: string }) =>
           name: true,
         },
       },
+      tenantMemberships: {
+        orderBy: [
+          {
+            tenant: {
+              isActive: "desc",
+            },
+          },
+          {
+            createdAt: "asc",
+          },
+        ],
+        take: 1,
+        select: {
+          tenantId: true,
+          role: true,
+          tenant: {
+            select: {
+              id: true,
+              name: true,
+              slug: true,
+              isActive: true,
+            },
+          },
+        },
+      },
     },
   });
 
@@ -72,11 +98,14 @@ export const loginUser = async (payload: { email: string; password: string }) =>
 
   const token = jwt.sign({ id: user.id }, env.JWT_SECRET, { expiresIn: "1d" });
 
-  const { password: userPassword, role, ...rest } = user;
+  const tenantMembership = buildTenantMembership(user.tenantMemberships[0]);
+
+  const { password: userPassword, role, tenantMemberships: _tenantMemberships, ...rest } = user;
 
   return new HTTPSuccessResponse("Login successfully", 201, {
     ...rest,
     role: role?.name,
+    tenantMembership,
     token,
   });
 };

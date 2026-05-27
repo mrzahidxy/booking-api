@@ -1,7 +1,6 @@
 import { Router } from "express";
 import authRoutes from "./auth";
-import restaurantRoutes from "./restaurant";
-import { hotelRoutes } from "./hotel";
+import propertyRoutes from "./property";
 import { roleMenuPermissionRoutes } from "./role-permission";
 import userRoutes from "./user";
 import reviewRoutes from "./review";
@@ -15,8 +14,7 @@ import adminRoutes from "./admin";
 const rootRouter: Router = Router();
 
 rootRouter.use("/auth", authRoutes);
-rootRouter.use('/restaurants', restaurantRoutes)
-rootRouter.use('/hotels', hotelRoutes)
+rootRouter.use("/properties", propertyRoutes);
 rootRouter.use('/role-permission', roleMenuPermissionRoutes)
 rootRouter.use('/users', userRoutes)
 rootRouter.use('/reviews', reviewRoutes)

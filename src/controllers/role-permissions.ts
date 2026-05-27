@@ -62,13 +62,16 @@ export const getPermissions = async (req: Request, res: Response) => {
   const limit = parseInt(req.query.limit as string) || 10;
   const skip = (page - 1) * limit;
 
-  // Fetch roles with pagination
+  // Fetch permissions with pagination
   const permissions = await prisma.permission.findMany({ skip, take: limit });
   const totalPermissions = await prisma.permission.count();
 
 
   if (!permissions || permissions.length === 0) {
-    throw new NotFoundException("No roles found", ErrorCode.ROLE_NOT_FOUND);
+    throw new NotFoundException(
+      "No permissions found",
+      ErrorCode.PERMISIION_NOT_FOUND
+    );
   }
   const formattedResponse = formatPaginationResponse(permissions, totalPermissions, page, limit);
 
@@ -91,7 +94,10 @@ export const getPermissionById = async (req: Request, res: Response) => {
   });
 
   if (!permission) {
-    throw new NotFoundException("Permission not found", ErrorCode.ROLE_NOT_FOUND);
+    throw new NotFoundException(
+      "Permission not found",
+      ErrorCode.PERMISIION_NOT_FOUND
+    );
   }
 
   const response = new HTTPSuccessResponse(
@@ -337,9 +343,6 @@ export const assaignUserRole = async (req: Request, res: Response) => {
       id: +id,
     },
   });
-
-
-  console.log('user', user);
 
   if (!user) {
     throw new NotFoundException("User not found", ErrorCode.USER_NOT_FOUND);

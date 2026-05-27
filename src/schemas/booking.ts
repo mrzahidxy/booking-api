@@ -1,13 +1,8 @@
 import { z } from "zod";
 
 export const reservationSchema = z.object({
-  restaurantId: z
-    .number()
-    .int()
-    .positive()
-    .refine((value) => value > 0, {
-      message: "restaurantId is required and must be a positive integer",
-    }),
+  propertyId: z.number().int().positive().optional(),
+  restaurantId: z.number().int().positive().optional(),
   bookingDate: z.string().refine((date) => !isNaN(Date.parse(date)), {
     message: "bookingDate is required and must be a valid date",
   }),
@@ -23,6 +18,9 @@ export const reservationSchema = z.object({
     .refine((value) => value > 0, {
       message: "partySize is required and must be a positive integer",
     }),
+}).refine((value) => value.propertyId != null || value.restaurantId != null, {
+  message: "propertyId is required and must be a positive integer",
+  path: ["propertyId"],
 });
 
 export const bookingStatusSchema = z.object({

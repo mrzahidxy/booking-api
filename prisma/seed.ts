@@ -1,15 +1,99 @@
 import {
   BookingStatus,
+  PaymentStatus,
+  Prisma,
   PrismaClient,
+  PropertyKind,
   RoomType,
+  TenantMemberRole,
   TimeSlotType,
 } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import dotenv from "dotenv";
+import { slugify } from "../src/utils/slug";
 
 dotenv.config({ path: ".env" });
 
 const prisma = new PrismaClient();
+const PAYMENT_CURRENCY = "bdt";
+
+type SeedUser = {
+  email: string;
+  name: string;
+  phone: string;
+  roleName: "ADMIN" | "USER";
+  fcmToken?: string;
+};
+
+type SeedRoom = {
+  roomType: RoomType;
+  price: number;
+  quantity: number;
+  image: string[];
+  amenities: string[];
+};
+
+type SeedReview = {
+  userEmail: string;
+  rating: number;
+  review: string;
+};
+
+type HotelBookingSeed = {
+  kind: "hotel";
+  userEmail: string;
+  bookingDate: Date;
+  roomType: RoomType;
+  roomQuantity: number;
+  totalPrice: number;
+  status: BookingStatus;
+};
+
+type RestaurantBookingSeed = {
+  kind: "restaurant";
+  userEmail: string;
+  bookingDate: Date;
+  partySize: number;
+  timeSlot: TimeSlotType;
+  totalPrice: number;
+  status: BookingStatus;
+};
+
+type BookingSeed = HotelBookingSeed | RestaurantBookingSeed;
+
+type SeedNotification = {
+  email: string;
+  title: string;
+  body: string;
+  metadata: Record<string, unknown>;
+};
+
+type TenantSeed = {
+  tenant: {
+    name: string;
+    slug: string;
+  };
+  members: {
+    ownerEmail: string;
+    staffEmail: string;
+  };
+  property: {
+    kind: PropertyKind;
+    name: string;
+    location: string;
+    image: string[];
+    description: string | null;
+    amenities: string[];
+    cuisine: string[];
+    timeSlots: TimeSlotType[];
+    seats: number | null;
+    menu: Array<{ name: string; price: number }> | null;
+    rooms: SeedRoom[];
+  };
+  reviews: SeedReview[];
+  bookings: BookingSeed[];
+  notifications: SeedNotification[];
+};
 
 const permissions = [
   "GET_USER",
@@ -19,404 +103,307 @@ const permissions = [
   "GET_ASSIGNED_PERMISSION",
   "ASSIGN_PERMISSION",
   "ASSIGN_ROLE",
-  "MANAGE_HOTEL",
-  "MANAGE_RESTAURANT",
-  "MANAGE_BOOKING",
+] as const;
+
+const roles: Array<{ name: "ADMIN" | "USER"; permissions: readonly string[] }> = [
+  { name: "ADMIN", permissions: [...permissions] },
+  { name: "USER", permissions: [] },
 ];
 
-const roles = [
-  { name: "ADMIN", permissions },
-  {
-    name: "STAFF",
-    permissions: [
-      "GET_USER",
-      "UPDATE_USER",
-      "MANAGE_HOTEL",
-      "MANAGE_RESTAURANT",
-      "MANAGE_BOOKING",
-    ],
-  },
-  {
-    name: "USER",
-    permissions: [],
-  },
-];
-
-const usersSeed: Array<{
-  email: string;
-  name: string;
-  phone: string;
-  roleName: "ADMIN" | "STAFF" | "USER";
-  fcmToken?: string;
-}> = [
+const usersSeed: SeedUser[] = [
   {
     email: "admin@example.com",
-    name: "Arafat Chowdhury",
+    name: "Platform Admin",
     phone: "01711000001",
     roleName: "ADMIN",
     fcmToken: "demo-admin-token",
   },
   {
-    email: "staff@example.com",
-    name: "Mim Akter",
+    email: "owner@example.com",
+    name: "Tenant Owner",
     phone: "01711000002",
-    roleName: "STAFF",
+    roleName: "USER",
+    fcmToken: "demo-owner-token",
+  },
+  {
+    email: "staff@example.com",
+    name: "Tenant Staff",
+    phone: "01711000003",
+    roleName: "USER",
     fcmToken: "demo-staff-token",
   },
   {
     email: "user@example.com",
-    name: "Arif Rahman",
-    phone: "01711000003",
+    name: "Regular User",
+    phone: "01711000004",
     roleName: "USER",
     fcmToken: "demo-user-token",
   },
   {
-    email: "sadia@example.com",
-    name: "Sadia Noor",
-    phone: "01711000004",
-    roleName: "USER",
-  },
-  {
-    email: "farhan@example.com",
-    name: "Farhan Hasan",
+    email: "restaurant-owner@example.com",
+    name: "Restaurant Owner",
     phone: "01711000005",
     roleName: "USER",
+    fcmToken: "demo-restaurant-owner-token",
   },
   {
-    email: "nabila@example.com",
-    name: "Nabila Hossain",
+    email: "restaurant-staff@example.com",
+    name: "Restaurant Staff",
     phone: "01711000006",
     roleName: "USER",
+    fcmToken: "demo-restaurant-staff-token",
+  },
+  {
+    email: "restaurant-user@example.com",
+    name: "Restaurant Guest",
+    phone: "01711000007",
+    roleName: "USER",
+    fcmToken: "demo-restaurant-user-token",
   },
 ];
 
-const hotelsSeed = [
+const tenantSeeds: TenantSeed[] = [
   {
-    name: "Bayview Grand Resort",
-    location: "Cox's Bazar, Bangladesh",
-    image: [
-      "https://images.unsplash.com/photo-1501117716987-c8e1ecb210cc",
-      "https://images.unsplash.com/photo-1502672260266-1c1ef2d93688",
-      "https://images.unsplash.com/photo-1542314831-068cd1dbfeeb",
-    ],
-    description:
-      "A polished beachfront resort with sea-facing rooms, family facilities, and sunset dining.",
-    amenities: [
-      "Private Beach",
-      "Infinity Pool",
-      "Airport Shuttle",
-      "Kids Club",
-      "Spa",
-    ],
-    rooms: [
+    tenant: {
+      name: "Gontobbo Seaside Tenant",
+      slug: "gontobbo-seaside",
+    },
+    members: {
+      ownerEmail: "owner@example.com",
+      staffEmail: "staff@example.com",
+    },
+    property: {
+      kind: PropertyKind.HOTEL,
+      name: "Bayview Grand Resort",
+      location: "Cox's Bazar, Bangladesh",
+      image: [
+        "https://images.unsplash.com/photo-1501117716987-c8e1ecb210cc",
+        "https://images.unsplash.com/photo-1502672260266-1c1ef2d93688",
+        "https://images.unsplash.com/photo-1542314831-068cd1dbfeeb",
+      ],
+      description:
+        "A polished beachfront resort with sea-facing rooms, family facilities, and sunset dining.",
+      amenities: ["Private Beach", "Infinity Pool", "Airport Shuttle", "Kids Club", "Spa"],
+      cuisine: [],
+      timeSlots: [],
+      seats: null,
+      menu: null,
+      rooms: [
+        {
+          roomType: RoomType.SINGLE,
+          price: 95,
+          quantity: 12,
+          image: ["https://images.unsplash.com/photo-1505693416388-ac5ce068fe85"],
+          amenities: ["City View", "Work Desk", "Complimentary Breakfast"],
+        },
+        {
+          roomType: RoomType.DOUBLE,
+          price: 145,
+          quantity: 18,
+          image: ["https://images.unsplash.com/photo-1505691938895-1758d7feb511"],
+          amenities: ["Balcony", "Ocean View", "Mini Bar"],
+        },
+        {
+          roomType: RoomType.TRIPLE,
+          price: 210,
+          quantity: 6,
+          image: ["https://images.unsplash.com/photo-1505691723518-36a5ac3be353"],
+          amenities: ["Living Area", "Extra Bed", "Family Friendly"],
+        },
+      ],
+    },
+    reviews: [
       {
+        userEmail: "user@example.com",
+        rating: 5,
+        review: "Beach access was excellent and the room service was fast.",
+      },
+      {
+        userEmail: "admin@example.com",
+        rating: 4,
+        review: "Good service flow and a strong beachfront setting.",
+      },
+      {
+        userEmail: "owner@example.com",
+        rating: 5,
+        review: "Comfortable rooms and helpful staff throughout the stay.",
+      },
+    ],
+    bookings: [
+      {
+        kind: "hotel",
+        userEmail: "user@example.com",
+        bookingDate: new Date("2026-06-10T10:00:00.000Z"),
+        roomType: RoomType.DOUBLE,
+        roomQuantity: 1,
+        totalPrice: 290,
+        status: BookingStatus.CONFIRMED,
+      },
+      {
+        kind: "hotel",
+        userEmail: "owner@example.com",
+        bookingDate: new Date("2026-06-14T10:00:00.000Z"),
+        roomType: RoomType.TRIPLE,
+        roomQuantity: 1,
+        totalPrice: 450,
+        status: BookingStatus.PENDING,
+      },
+      {
+        kind: "hotel",
+        userEmail: "staff@example.com",
+        bookingDate: new Date("2026-06-18T10:00:00.000Z"),
         roomType: RoomType.SINGLE,
-        price: 95,
-        quantity: 12,
-        image: ["https://images.unsplash.com/photo-1505693416388-ac5ce068fe85"],
-        amenities: ["City View", "Work Desk", "Complimentary Breakfast"],
+        roomQuantity: 2,
+        totalPrice: 160,
+        status: BookingStatus.COMPLETED,
+      },
+    ],
+    notifications: [
+      {
+        email: "user@example.com",
+        title: "Room booking confirmed",
+        body: "Your Bayview Grand Resort reservation is confirmed for the selected dates.",
+        metadata: { type: "booking", category: "hotel" },
       },
       {
-        roomType: RoomType.DOUBLE,
-        price: 145,
-        quantity: 18,
-        image: ["https://images.unsplash.com/photo-1505691938895-1758d7feb511"],
-        amenities: ["Balcony", "Ocean View", "Mini Bar"],
+        email: "owner@example.com",
+        title: "Review your stay",
+        body: "Share feedback for your recent hotel booking to help future guests.",
+        metadata: { type: "review_request", category: "hotel" },
       },
       {
-        roomType: RoomType.TRIPLE,
-        price: 210,
-        quantity: 6,
-        image: ["https://images.unsplash.com/photo-1505691723518-36a5ac3be353"],
-        amenities: ["Living Area", "Extra Bed", "Family Friendly"],
+        email: "staff@example.com",
+        title: "Booking ready",
+        body: "A new reservation needs front desk attention.",
+        metadata: { type: "ops", category: "hotel" },
       },
     ],
   },
   {
-    name: "Hillside Crest Retreat",
-    location: "Sajek Valley, Bangladesh",
-    image: [
-      "https://images.unsplash.com/photo-1518732714860-b62714ce0c59",
-      "https://images.unsplash.com/photo-1445019980597-93fa8acb246c",
-      "https://images.unsplash.com/photo-1500375592092-40eb2168fd21",
-    ],
-    description:
-      "An eco-lodge with valley views, campfire nights, and adventure-focused guest experiences.",
-    amenities: [
-      "Bonfire Lounge",
-      "Trekking Guide",
-      "Rooftop Cafe",
-      "24/7 Front Desk",
-    ],
-    rooms: [
+    tenant: {
+      name: "Gontobbo Taste Tenant",
+      slug: "gontobbo-taste",
+    },
+    members: {
+      ownerEmail: "restaurant-owner@example.com",
+      staffEmail: "restaurant-staff@example.com",
+    },
+    property: {
+      kind: PropertyKind.RESTAURANT,
+      name: "Skyline Spice Rooftop",
+      location: "Dhaka, Bangladesh",
+      image: [
+        "https://images.unsplash.com/photo-1414235077428-338989a2e8c0",
+        "https://images.unsplash.com/photo-1504674900247-0877df9cc836",
+      ],
+      description:
+        "A rooftop dining room serving modern Bangladeshi plates and late-night tasting menus.",
+      amenities: [],
+      cuisine: ["Bangladeshi", "Fusion", "Rooftop Dining"],
+      timeSlots: [TimeSlotType.EVENING, TimeSlotType.NIGHT],
+      seats: 72,
+      menu: [
+        { name: "Smoked Hilsa Plate", price: 24 },
+        { name: "Beef Tehari Bowl", price: 18 },
+        { name: "Mango Mousse", price: 9 },
+      ],
+      rooms: [],
+    },
+    reviews: [
       {
-        roomType: RoomType.TWIN,
-        price: 110,
-        quantity: 10,
-        image: ["https://images.unsplash.com/photo-1494526585095-c41746248156"],
-        amenities: ["Mountain View", "Shared Deck", "Tea Station"],
+        userEmail: "restaurant-user@example.com",
+        rating: 5,
+        review: "The rooftop atmosphere and tasting menu were both memorable.",
       },
       {
-        roomType: RoomType.DOUBLE,
-        price: 160,
-        quantity: 8,
-        image: ["https://images.unsplash.com/photo-1560448204-603b3fc33ddc"],
-        amenities: ["Private Balcony", "Heated Shower", "Workspace"],
+        userEmail: "admin@example.com",
+        rating: 4,
+        review: "Good views, smooth service, and a menu that feels current.",
       },
       {
-        roomType: RoomType.TRIPLE,
-        price: 225,
-        quantity: 4,
-        image: ["https://images.unsplash.com/photo-1512917774080-9991f1c4c750"],
-        amenities: ["Camp View", "Sofa Bed", "Breakfast Included"],
+        userEmail: "restaurant-owner@example.com",
+        rating: 5,
+        review: "Strong kitchen timing and a polished dining room experience.",
       },
     ],
-  },
-  {
-    name: "Capital Suites Dhaka",
-    location: "Gulshan, Dhaka, Bangladesh",
-    image: [
-      "https://images.unsplash.com/photo-1551882547-ff40c63fe5fa",
-      "https://images.unsplash.com/photo-1566073771259-6a8506099945",
-      "https://images.unsplash.com/photo-1571896349842-33c89424de2d",
-    ],
-    description:
-      "A business-friendly city hotel with executive rooms, boardrooms, and convenient airport access.",
-    amenities: [
-      "Conference Hall",
-      "Rooftop Gym",
-      "Airport Transfer",
-      "Laundry Service",
-      "Business Center",
-    ],
-    rooms: [
+    bookings: [
       {
-        roomType: RoomType.SINGLE,
-        price: 80,
-        quantity: 20,
-        image: ["https://images.unsplash.com/photo-1505693416388-ac5ce068fe85"],
-        amenities: ["Desk Lamp", "Fast Wi-Fi", "City View"],
+        kind: "restaurant",
+        userEmail: "restaurant-user@example.com",
+        bookingDate: new Date("2026-06-10T14:00:00.000Z"),
+        partySize: 4,
+        timeSlot: TimeSlotType.EVENING,
+        totalPrice: 88,
+        status: BookingStatus.CONFIRMED,
       },
       {
-        roomType: RoomType.DOUBLE,
-        price: 130,
-        quantity: 14,
-        image: ["https://images.unsplash.com/photo-1559599238-308793637427"],
-        amenities: ["King Bed", "Streaming TV", "Minibar"],
+        kind: "restaurant",
+        userEmail: "restaurant-owner@example.com",
+        bookingDate: new Date("2026-06-12T08:30:00.000Z"),
+        partySize: 2,
+        timeSlot: TimeSlotType.MORNING,
+        totalPrice: 18,
+        status: BookingStatus.COMPLETED,
       },
       {
-        roomType: RoomType.TRIPLE,
-        price: 185,
-        quantity: 5,
-        image: ["https://images.unsplash.com/photo-1582719471387-9c8d1f1c7c39"],
-        amenities: ["Lounge Area", "Extra Sofa", "Meeting Table"],
+        kind: "restaurant",
+        userEmail: "restaurant-staff@example.com",
+        bookingDate: new Date("2026-06-16T17:30:00.000Z"),
+        partySize: 6,
+        timeSlot: TimeSlotType.AFTERNOON,
+        totalPrice: 136,
+        status: BookingStatus.PENDING,
       },
     ],
-  },
-  {
-    name: "Riverfront Heritage Inn",
-    location: "Sylhet, Bangladesh",
-    image: [
-      "https://images.unsplash.com/photo-1455587734955-081b22074882",
-      "https://images.unsplash.com/photo-1484154218962-a197022b5858",
-      "https://images.unsplash.com/photo-1505693416388-ac5ce068fe85",
-    ],
-    description:
-      "A calm riverside stay blending heritage design with modern comfort and tea-country excursions.",
-    amenities: [
-      "River Deck",
-      "Heritage Lounge",
-      "Tea Garden Tours",
-      "Breakfast Buffet",
-    ],
-    rooms: [
+    notifications: [
       {
-        roomType: RoomType.DOUBLE,
-        price: 125,
-        quantity: 16,
-        image: ["https://images.unsplash.com/photo-1505691723518-36a5ac3be353"],
-        amenities: ["River View", "Balcony", "Reading Chair"],
+        email: "restaurant-user@example.com",
+        title: "Restaurant reservation confirmed",
+        body: "Your rooftop dining booking is ready for this evening.",
+        metadata: { type: "booking", category: "restaurant" },
       },
       {
-        roomType: RoomType.TWIN,
-        price: 105,
-        quantity: 10,
-        image: ["https://images.unsplash.com/photo-1494526585095-c41746248156"],
-        amenities: ["Separate Beds", "Work Desk", "Tea Maker"],
+        email: "restaurant-owner@example.com",
+        title: "Payment completed",
+        body: "Your restaurant payment was processed successfully.",
+        metadata: { type: "payment", category: "restaurant" },
       },
       {
-        roomType: RoomType.TRIPLE,
-        price: 175,
-        quantity: 6,
-        image: ["https://images.unsplash.com/photo-1542314831-068cd1dbfeeb"],
-        amenities: ["Family Suite", "Extra Bed", "Sitting Area"],
+        email: "restaurant-staff@example.com",
+        title: "New booking assigned",
+        body: "A new restaurant reservation needs attention.",
+        metadata: { type: "ops", category: "restaurant" },
       },
     ],
   },
-  {
-    name: "Mangrove Eco Lodge",
-    location: "Khulna, Bangladesh",
-    image: [
-      "https://images.unsplash.com/photo-1496417263034-38ec4f0b665a",
-      "https://images.unsplash.com/photo-1468824357306-a439d58ccb1c",
-      "https://images.unsplash.com/photo-1505693416388-ac5ce068fe85",
-    ],
-    description:
-      "An eco-conscious lodge for wildlife travelers, with guided tours and locally sourced dining.",
-    amenities: [
-      "Eco Tours",
-      "Solar Power",
-      "Nature Walks",
-      "Local Cuisine",
-      "Boat Hire",
-    ],
-    rooms: [
-      {
-        roomType: RoomType.SINGLE,
-        price: 70,
-        quantity: 14,
-        image: ["https://images.unsplash.com/photo-1505693416388-ac5ce068fe85"],
-        amenities: ["Garden View", "Mosquito Net", "Ceiling Fan"],
-      },
-      {
-        roomType: RoomType.DOUBLE,
-        price: 115,
-        quantity: 10,
-        image: ["https://images.unsplash.com/photo-1551882547-ff40c63fe5fa"],
-        amenities: ["River Breeze", "Balcony", "Eco Toiletries"],
-      },
-      {
-        roomType: RoomType.TRIPLE,
-        price: 165,
-        quantity: 4,
-        image: ["https://images.unsplash.com/photo-1578683010236-d716f9a3f461"],
-        amenities: ["Family Setup", "Luggage Rack", "Breakfast Included"],
-      },
-    ],
-  },
-] as const satisfies ReadonlyArray<{
-  name: string;
-  location: string;
-  image: string[];
-  description: string;
-  amenities: string[];
-  rooms: Array<{
-    roomType: RoomType;
-    price: number;
-    quantity: number;
-    image: string[];
-    amenities: string[];
-  }>;
-}>;
+];
 
-const restaurantsSeed = [
-  {
-    name: "Skyline Spice Rooftop",
-    location: "Dhaka, Bangladesh",
-    description:
-      "A rooftop dining room serving modern Bangladeshi plates and late-night tasting menus.",
-    cuisine: ["Bangladeshi", "Fusion", "Rooftop Dining"],
-    timeSlots: [TimeSlotType.EVENING, TimeSlotType.NIGHT],
-    image: [
-      "https://images.unsplash.com/photo-1414235077428-338989a2e8c0",
-      "https://images.unsplash.com/photo-1504674900247-0877df9cc836",
-    ],
-    seats: 72,
-    menu: [
-      { name: "Smoked Hilsa Plate", price: 24 },
-      { name: "Beef Tehari Bowl", price: 18 },
-      { name: "Mango Mousse", price: 9 },
-    ],
-  },
-  {
-    name: "Tea Garden Cafe",
-    location: "Sylhet, Bangladesh",
-    description:
-      "A relaxed cafe with tea-pairing menus, baked snacks, and day-time work-friendly seating.",
-    cuisine: ["Cafe", "Tea House", "Bakery"],
-    timeSlots: [TimeSlotType.MORNING, TimeSlotType.NOON, TimeSlotType.AFTERNOON],
-    image: [
-      "https://images.unsplash.com/photo-1466978913421-dad2ebd01d17",
-      "https://images.unsplash.com/photo-1473093295043-cdd812d0e601",
-    ],
-    seats: 84,
-    menu: [
-      { name: "Seven-Layer Tea", price: 5 },
-      { name: "Pitha Platter", price: 7 },
-      { name: "Chicken Puff", price: 4 },
-    ],
-  },
-  {
-    name: "Coastline Grill",
-    location: "Cox's Bazar, Bangladesh",
-    description:
-      "Seafood-forward grill house with family seating and sunset service on the beach side.",
-    cuisine: ["Seafood", "Grill", "Family Dining"],
-    timeSlots: [TimeSlotType.AFTERNOON, TimeSlotType.EVENING, TimeSlotType.NIGHT],
-    image: [
-      "https://images.unsplash.com/photo-1547592180-85f173990554",
-      "https://images.unsplash.com/photo-1559339352-11d035aa65de",
-    ],
-    seats: 64,
-    menu: [
-      { name: "Grilled Prawn Skewer", price: 22 },
-      { name: "Herb Butter Fish", price: 26 },
-      { name: "Tropical Salad", price: 10 },
-    ],
-  },
-  {
-    name: "Heritage Plate",
-    location: "Chittagong, Bangladesh",
-    description:
-      "A destination restaurant spotlighting regional recipes, clay oven breads, and slow braises.",
-    cuisine: ["Regional", "Fine Dining", "Clay Oven"],
-    timeSlots: [TimeSlotType.NOON, TimeSlotType.AFTERNOON, TimeSlotType.EVENING],
-    image: [
-      "https://images.unsplash.com/photo-1490645935967-10de6ba17061",
-      "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4",
-    ],
-    seats: 58,
-    menu: [
-      { name: "Beef Rezala", price: 20 },
-      { name: "Smoked Rice Pilaf", price: 16 },
-      { name: "Rasmalai", price: 6 },
-    ],
-  },
-  {
-    name: "Mangrove Table",
-    location: "Khulna, Bangladesh",
-    description:
-      "A locally sourced kitchen serving river fish, seasonal vegetables, and shared tasting boards.",
-    cuisine: ["Local", "Seasonal", "Shared Plates"],
-    timeSlots: [TimeSlotType.MORNING, TimeSlotType.NOON, TimeSlotType.EVENING],
-    image: [
-      "https://images.unsplash.com/photo-1504674900247-0877df9cc836",
-      "https://images.unsplash.com/photo-1555396273-367ea4eb4db5",
-    ],
-    seats: 46,
-    menu: [
-      { name: "Chingri Bhorta Plate", price: 14 },
-      { name: "Vegetable Korma", price: 11 },
-      { name: "Jaggery Rice Pudding", price: 5 },
-    ],
-  },
-] as const satisfies ReadonlyArray<{
-  name: string;
-  location: string;
-  description: string;
-  cuisine: string[];
-  timeSlots: TimeSlotType[];
-  image: string[];
-  seats: number;
-  menu: Array<{ name: string; price: number }>;
-}>;
+type SeedUserRow = {
+  id: number;
+  email: string;
+};
 
-type HotelSeed = (typeof hotelsSeed)[number];
-type RestaurantSeed = (typeof restaurantsSeed)[number];
-type UserSeed = (typeof usersSeed)[number];
+type SeedRoomRow = {
+  id: number;
+  roomType: RoomType;
+  price: number;
+};
 
-function hashPassword() {
-  return bcrypt.hash("Password@123", 10);
+type SeedBookingRow = {
+  id: number;
+  userId: number;
+  roomId: number | null;
+  status: BookingStatus;
+};
+
+function paymentAmount(totalPrice: number) {
+  return Math.round(totalPrice * 100);
+}
+
+function paymentStatusForBooking(status: BookingStatus) {
+  if (status === BookingStatus.PENDING) return PaymentStatus.PENDING;
+  if (status === BookingStatus.CANCELLED) return PaymentStatus.FAILED;
+  return PaymentStatus.SUCCEEDED;
 }
 
 function averageRating(ratings: number[]) {
@@ -425,53 +412,59 @@ function averageRating(ratings: number[]) {
 }
 
 async function resetDatabase() {
-  await prisma.payment.deleteMany();
-  await prisma.booking.deleteMany();
-  await prisma.review.deleteMany();
-  await prisma.room.deleteMany();
-  await prisma.hotel.deleteMany();
-  await prisma.restaurant.deleteMany();
-  await prisma.notification.deleteMany();
-  await prisma.user.deleteMany();
-  await prisma.rolePermission.deleteMany();
-  await prisma.role.deleteMany();
-  await prisma.permission.deleteMany();
+  await prisma.$executeRawUnsafe(`
+    DO $$
+    DECLARE
+      table_name text;
+    BEGIN
+      FOR table_name IN
+        SELECT tablename
+        FROM pg_tables
+        WHERE schemaname = 'public'
+          AND tablename <> '_prisma_migrations'
+      LOOP
+        EXECUTE format('TRUNCATE TABLE %I RESTART IDENTITY CASCADE;', table_name);
+      END LOOP;
+    END $$;
+  `);
 }
 
 async function seedPermissionsAndRoles() {
   for (const permission of permissions) {
-    await prisma.permission.create({
-      data: { name: permission },
-    });
+    await prisma.permission.create({ data: { name: permission } });
   }
 
-  const permissionRows = await prisma.permission.findMany();
+  const permissionRows = await prisma.permission.findMany({
+    orderBy: { id: "asc" },
+  });
 
   for (const role of roles) {
-    const rolePermissions = permissionRows.filter((permission) =>
+    const createdRole = await prisma.role.create({
+      data: { name: role.name },
+    });
+
+    const scopedPermissions = permissionRows.filter((permission) =>
       role.permissions.includes(permission.name),
     );
 
-    await prisma.role.create({
-      data: {
-        name: role.name,
-        rolePermission: {
-          createMany: {
-            data: rolePermissions.map((permission) => ({
-              permissionId: permission.id,
-            })),
-          },
-        },
-      },
-    });
+    if (scopedPermissions.length > 0) {
+      await prisma.rolePermission.createMany({
+        data: scopedPermissions.map((permission) => ({
+          roleId: createdRole.id,
+          permissionId: permission.id,
+        })),
+      });
+    }
   }
 }
 
 async function seedUsers() {
-  const password = await hashPassword();
-  const roleRows = await prisma.role.findMany();
+  const password = await bcrypt.hash("Password@123", 10);
+  const roleRows = await prisma.role.findMany({
+    orderBy: { id: "asc" },
+  });
 
-  const users = [] as Array<{ id: number; email: string; name: string | null }>;
+  const users: SeedUserRow[] = [];
 
   for (const user of usersSeed) {
     const role = roleRows.find((entry) => entry.name === user.roleName);
@@ -493,396 +486,132 @@ async function seedUsers() {
     users.push({
       id: created.id,
       email: created.email,
-      name: created.name,
     });
   }
 
   return users;
 }
 
-async function seedHotels() {
-  const hotelRows: Array<{
-    id: number;
-    name: string;
-    location: string;
-    rooms: Array<{ id: number; roomType: RoomType; price: number }>;
-  }> = [];
+async function seedTenant(tenantSeed: TenantSeed, users: SeedUserRow[]) {
+  const tenant = await prisma.tenant.create({
+    data: tenantSeed.tenant,
+  });
 
-  for (const hotel of hotelsSeed) {
-    const created = await prisma.hotel.create({
-      data: {
-        name: hotel.name,
-        location: hotel.location,
-        description: hotel.description,
-        amenities: [...hotel.amenities],
-        image: [...hotel.image],
-        rooms: {
-          create: hotel.rooms.map((room) => ({
-            roomType: room.roomType,
-            price: room.price,
-            quantity: room.quantity,
-            image: [...room.image],
-            amenities: [...room.amenities],
-          })),
-        },
-      },
-    });
+  const owner = users.find((user) => user.email === tenantSeed.members.ownerEmail);
+  const staff = users.find((user) => user.email === tenantSeed.members.staffEmail);
 
-    const rooms = await prisma.room.findMany({
-      where: { hotelId: created.id },
-      orderBy: { id: "asc" },
-    });
-
-    hotelRows.push({
-      id: created.id,
-      name: created.name,
-      location: created.location,
-      rooms: rooms.map((room) => ({
-        id: room.id,
-        roomType: room.roomType,
-        price: room.price,
-      })),
-    });
+  if (!owner || !staff) {
+    throw new Error(`Missing tenant members for ${tenantSeed.tenant.slug}`);
   }
 
-  return hotelRows;
-}
-
-async function seedRestaurants() {
-  const restaurantRows: Array<{
-    id: number;
-    name: string;
-    location: string;
-    menu: RestaurantSeed["menu"];
-  }> = [];
-
-  for (const restaurant of restaurantsSeed) {
-    const created = await prisma.restaurant.create({
-      data: {
-        name: restaurant.name,
-        description: restaurant.description,
-        location: restaurant.location,
-        cuisine: [...restaurant.cuisine],
-        image: [...restaurant.image],
-        seats: restaurant.seats,
-        timeSlots: [...restaurant.timeSlots],
-        menu: restaurant.menu.map((item) => ({ ...item })),
+  await prisma.tenantMember.createMany({
+    data: [
+      {
+        tenantId: tenant.id,
+        userId: owner.id,
+        role: TenantMemberRole.OWNER,
       },
-    });
+      {
+        tenantId: tenant.id,
+        userId: staff.id,
+        role: TenantMemberRole.STAFF,
+      },
+    ],
+  });
 
-    restaurantRows.push({
-      id: created.id,
-      name: created.name,
-      location: created.location,
-      menu: restaurant.menu,
-    });
-  }
+  const property = await prisma.property.create({
+    data: {
+      tenantId: tenant.id,
+      kind: tenantSeed.property.kind,
+      slug: slugify(tenantSeed.property.name),
+      name: tenantSeed.property.name,
+      location: tenantSeed.property.location,
+      description: tenantSeed.property.description,
+      image: tenantSeed.property.image,
+      amenities: tenantSeed.property.amenities,
+      cuisine: tenantSeed.property.cuisine,
+      timeSlots: tenantSeed.property.timeSlots,
+      seats: tenantSeed.property.seats,
+      menu: tenantSeed.property.menu === null ? Prisma.DbNull : tenantSeed.property.menu,
+      rooms: tenantSeed.property.rooms.length
+        ? {
+            create: tenantSeed.property.rooms.map((room) => ({
+              roomType: room.roomType,
+              price: room.price,
+              quantity: room.quantity,
+              image: [...room.image],
+              amenities: [...room.amenities],
+            })),
+          }
+        : undefined,
+    },
+    include: {
+      rooms: true,
+    },
+  });
 
-  return restaurantRows;
+  const reviews = await seedReviews(users, tenantSeed.reviews, property.id);
+  const bookings = await seedBookingsAndPayments(
+    users,
+    tenantSeed.bookings,
+    {
+      id: property.id,
+      kind: tenantSeed.property.kind,
+      rooms: property.rooms,
+    },
+    tenant.id,
+  );
+  await seedNotifications(users, tenantSeed.notifications, bookings);
+
+  await prisma.property.update({
+    where: { id: property.id },
+    data: { ratings: averageRating(reviews.map((review) => review.rating)) },
+  });
+
+  return {
+    tenant,
+    property,
+  };
 }
 
 async function seedReviews(
-  users: Array<{ id: number; email: string; name: string | null }>,
-  hotels: Array<{ id: number; name: string }>,
-  restaurants: Array<{ id: number; name: string }>,
+  users: SeedUserRow[],
+  reviews: SeedReview[],
+  propertyId: number,
 ) {
-  const hotelReviews = [
-    {
-      userEmail: "user@example.com",
-      hotelName: "Bayview Grand Resort",
-      rating: 5,
-      review: "Beach access was excellent and the room service was fast.",
-    },
-    {
-      userEmail: "sadia@example.com",
-      hotelName: "Bayview Grand Resort",
-      rating: 4,
-      review: "Great breakfast spread and a very clean pool area.",
-    },
-    {
-      userEmail: "farhan@example.com",
-      hotelName: "Hillside Crest Retreat",
-      rating: 5,
-      review: "Ideal for a quiet mountain escape with genuinely helpful staff.",
-    },
-    {
-      userEmail: "nabila@example.com",
-      hotelName: "Hillside Crest Retreat",
-      rating: 4,
-      review: "The view from the balcony made the stay feel premium.",
-    },
-    {
-      userEmail: "user@example.com",
-      hotelName: "Capital Suites Dhaka",
-      rating: 4,
-      review: "Convenient for meetings and the Wi-Fi was reliable throughout.",
-    },
-    {
-      userEmail: "staff@example.com",
-      hotelName: "Capital Suites Dhaka",
-      rating: 5,
-      review: "Smooth check-in flow, strong service, and very organized facilities.",
-    },
-    {
-      userEmail: "sadia@example.com",
-      hotelName: "Riverfront Heritage Inn",
-      rating: 5,
-      review: "Quiet location with a strong local character and good tea tour access.",
-    },
-    {
-      userEmail: "farhan@example.com",
-      hotelName: "Mangrove Eco Lodge",
-      rating: 4,
-      review: "A practical base for nature trips with thoughtful eco details.",
-    },
-  ];
+  const createdReviews: Array<{ rating: number }> = [];
 
-  const restaurantReviews = [
-    {
-      userEmail: "user@example.com",
-      restaurantName: "Skyline Spice Rooftop",
-      rating: 5,
-      review: "The rooftop atmosphere and tasting menu were both memorable.",
-    },
-    {
-      userEmail: "nabila@example.com",
-      restaurantName: "Skyline Spice Rooftop",
-      rating: 4,
-      review: "Good service, good views, and a menu that feels current.",
-    },
-    {
-      userEmail: "sadia@example.com",
-      restaurantName: "Tea Garden Cafe",
-      rating: 5,
-      review: "Easy place to work from with tea options that feel locally specific.",
-    },
-    {
-      userEmail: "farhan@example.com",
-      restaurantName: "Tea Garden Cafe",
-      rating: 4,
-      review: "Solid snack selection and calm daytime seating.",
-    },
-    {
-      userEmail: "user@example.com",
-      restaurantName: "Coastline Grill",
-      rating: 5,
-      review: "Fresh seafood and a layout that works well for families.",
-    },
-    {
-      userEmail: "staff@example.com",
-      restaurantName: "Heritage Plate",
-      rating: 4,
-      review: "The regional dishes felt polished without losing the local taste.",
-    },
-    {
-      userEmail: "sadia@example.com",
-      restaurantName: "Mangrove Table",
-      rating: 5,
-      review: "Seasonal ingredients and balanced menu pricing stood out.",
-    },
-    {
-      userEmail: "nabila@example.com",
-      restaurantName: "Mangrove Table",
-      rating: 4,
-      review: "Good local food and a relaxed atmosphere for group dining.",
-    },
-  ];
-
-  const createdReviews: Array<{ hotelId?: number; restaurantId?: number; rating: number }> = [];
-
-  for (const review of hotelReviews) {
+  for (const review of reviews) {
     const user = users.find((entry) => entry.email === review.userEmail);
-    const hotel = hotels.find((entry) => entry.name === review.hotelName);
-    if (!user || !hotel) {
-      throw new Error(`Missing hotel review relation for ${review.hotelName}`);
+
+    if (!user) {
+      throw new Error(`Missing review user ${review.userEmail}`);
     }
 
     const created = await prisma.review.create({
       data: {
         userId: user.id,
-        hotelId: hotel.id,
+        propertyId,
         rating: review.rating,
         review: review.review,
       },
     });
 
-    createdReviews.push({ hotelId: created.hotelId ?? undefined, rating: created.rating });
-  }
-
-  for (const review of restaurantReviews) {
-    const user = users.find((entry) => entry.email === review.userEmail);
-    const restaurant = restaurants.find((entry) => entry.name === review.restaurantName);
-    if (!user || !restaurant) {
-      throw new Error(`Missing restaurant review relation for ${review.restaurantName}`);
-    }
-
-    const created = await prisma.review.create({
-      data: {
-        userId: user.id,
-        restaurantId: restaurant.id,
-        rating: review.rating,
-        review: review.review,
-      },
-    });
-
-    createdReviews.push({
-      restaurantId: created.restaurantId ?? undefined,
-      rating: created.rating,
-    });
-  }
-
-  const hotelRatings = hotels.map((hotel) => {
-    const ratings = hotelReviews
-      .filter((review) => review.hotelName === hotel.name)
-      .map((review) => review.rating);
-    return {
-      id: hotel.id,
-      ratings: averageRating(ratings),
-    };
-  });
-
-  const restaurantRatings = restaurants.map((restaurant) => {
-    const ratings = restaurantReviews
-      .filter((review) => review.restaurantName === restaurant.name)
-      .map((review) => review.rating);
-    return {
-      id: restaurant.id,
-      ratings: averageRating(ratings),
-    };
-  });
-
-  for (const hotel of hotelRatings) {
-    await prisma.hotel.update({
-      where: { id: hotel.id },
-      data: { ratings: hotel.ratings },
-    });
-  }
-
-  for (const restaurant of restaurantRatings) {
-    await prisma.restaurant.update({
-      where: { id: restaurant.id },
-      data: { ratings: restaurant.ratings },
-    });
+    createdReviews.push({ rating: created.rating });
   }
 
   return createdReviews;
 }
 
 async function seedBookingsAndPayments(
-  users: Array<{ id: number; email: string; name: string | null }>,
-  hotels: Array<{
-    id: number;
-    name: string;
-    rooms: Array<{ id: number; roomType: RoomType; price: number }>;
-  }>,
-  restaurants: Array<{ id: number; name: string }>,
+  users: SeedUserRow[],
+  bookingSeeds: BookingSeed[],
+  property: { id: number; rooms: Array<{ id: number; roomType: RoomType }>; kind: PropertyKind },
+  tenantId: number,
 ) {
-  const bookingSpecs = [
-    {
-      userEmail: "user@example.com",
-      kind: "hotel" as const,
-      hotelName: "Bayview Grand Resort",
-      roomType: RoomType.DOUBLE,
-      bookingDate: new Date("2026-06-10T10:00:00.000Z"),
-      roomQuantity: 1,
-      totalPrice: 290,
-      status: BookingStatus.CONFIRMED,
-    },
-    {
-      userEmail: "sadia@example.com",
-      kind: "hotel" as const,
-      hotelName: "Hillside Crest Retreat",
-      roomType: RoomType.TRIPLE,
-      bookingDate: new Date("2026-06-14T10:00:00.000Z"),
-      roomQuantity: 1,
-      totalPrice: 450,
-      status: BookingStatus.PENDING,
-    },
-    {
-      userEmail: "farhan@example.com",
-      kind: "hotel" as const,
-      hotelName: "Capital Suites Dhaka",
-      roomType: RoomType.SINGLE,
-      bookingDate: new Date("2026-06-18T10:00:00.000Z"),
-      roomQuantity: 2,
-      totalPrice: 160,
-      status: BookingStatus.COMPLETED,
-    },
-    {
-      userEmail: "nabila@example.com",
-      kind: "hotel" as const,
-      hotelName: "Riverfront Heritage Inn",
-      roomType: RoomType.DOUBLE,
-      bookingDate: new Date("2026-06-22T10:00:00.000Z"),
-      roomQuantity: 1,
-      totalPrice: 250,
-      status: BookingStatus.CONFIRMED,
-    },
-    {
-      userEmail: "user@example.com",
-      kind: "hotel" as const,
-      hotelName: "Mangrove Eco Lodge",
-      roomType: RoomType.TRIPLE,
-      bookingDate: new Date("2026-06-28T10:00:00.000Z"),
-      roomQuantity: 1,
-      totalPrice: 330,
-      status: BookingStatus.CANCELLED,
-    },
-    {
-      userEmail: "sadia@example.com",
-      kind: "restaurant" as const,
-      restaurantName: "Skyline Spice Rooftop",
-      bookingDate: new Date("2026-06-10T14:00:00.000Z"),
-      partySize: 4,
-      timeSlot: TimeSlotType.EVENING,
-      totalPrice: 88,
-      status: BookingStatus.CONFIRMED,
-    },
-    {
-      userEmail: "farhan@example.com",
-      kind: "restaurant" as const,
-      restaurantName: "Tea Garden Cafe",
-      bookingDate: new Date("2026-06-12T08:30:00.000Z"),
-      partySize: 2,
-      timeSlot: TimeSlotType.MORNING,
-      totalPrice: 18,
-      status: BookingStatus.COMPLETED,
-    },
-    {
-      userEmail: "nabila@example.com",
-      kind: "restaurant" as const,
-      restaurantName: "Coastline Grill",
-      bookingDate: new Date("2026-06-16T17:30:00.000Z"),
-      partySize: 6,
-      timeSlot: TimeSlotType.AFTERNOON,
-      totalPrice: 136,
-      status: BookingStatus.PENDING,
-    },
-    {
-      userEmail: "user@example.com",
-      kind: "restaurant" as const,
-      restaurantName: "Heritage Plate",
-      bookingDate: new Date("2026-06-21T13:00:00.000Z"),
-      partySize: 3,
-      timeSlot: TimeSlotType.NOON,
-      totalPrice: 54,
-      status: BookingStatus.CONFIRMED,
-    },
-    {
-      userEmail: "staff@example.com",
-      kind: "restaurant" as const,
-      restaurantName: "Mangrove Table",
-      bookingDate: new Date("2026-06-25T19:00:00.000Z"),
-      partySize: 5,
-      timeSlot: TimeSlotType.EVENING,
-      totalPrice: 70,
-      status: BookingStatus.COMPLETED,
-    },
-  ];
+  const bookings: SeedBookingRow[] = [];
 
-  const bookings = [];
-
-  for (const spec of bookingSpecs) {
+  for (const spec of bookingSeeds) {
     const user = users.find((entry) => entry.email === spec.userEmail);
     if (!user) {
       throw new Error(`Missing booking user ${spec.userEmail}`);
@@ -891,17 +620,15 @@ async function seedBookingsAndPayments(
     const bookingData =
       spec.kind === "hotel"
         ? (() => {
-            const hotel = hotels.find((entry) => entry.name === spec.hotelName);
-            if (!hotel) {
-              throw new Error(`Missing hotel ${spec.hotelName}`);
-            }
+            const room = property.rooms.find((entry) => entry.roomType === spec.roomType);
 
-            const room = hotel.rooms.find((entry) => entry.roomType === spec.roomType);
             if (!room) {
-              throw new Error(`Missing room type ${spec.roomType} for ${spec.hotelName}`);
+              throw new Error(`Missing room type ${spec.roomType}`);
             }
 
             return {
+              tenantId,
+              propertyId: property.id,
               userId: user.id,
               roomId: room.id,
               bookingDate: spec.bookingDate,
@@ -910,22 +637,17 @@ async function seedBookingsAndPayments(
               status: spec.status,
             };
           })()
-        : (() => {
-            const restaurant = restaurants.find((entry) => entry.name === spec.restaurantName);
-            if (!restaurant) {
-              throw new Error(`Missing restaurant ${spec.restaurantName}`);
-            }
-
-            return {
-              userId: user.id,
-              restaurantId: restaurant.id,
-              bookingDate: spec.bookingDate,
-              totalPrice: spec.totalPrice,
-              partySize: spec.partySize,
-              timeSlot: spec.timeSlot,
-              status: spec.status,
-            };
-          })();
+        : {
+            tenantId,
+            propertyId: property.id,
+            userId: user.id,
+            roomId: null,
+            bookingDate: spec.bookingDate,
+            totalPrice: spec.totalPrice,
+            partySize: spec.partySize,
+            timeSlot: spec.timeSlot,
+            status: spec.status,
+          };
 
     const booking = await prisma.booking.create({
       data: bookingData,
@@ -933,22 +655,17 @@ async function seedBookingsAndPayments(
 
     bookings.push(booking);
 
+    const status = paymentStatusForBooking(booking.status);
     await prisma.payment.create({
       data: {
+        tenantId,
         bookingId: booking.id,
-        amount: booking.totalPrice,
-        currency: "USD",
-        status:
-          booking.status === BookingStatus.CANCELLED
-            ? "FAILED"
-            : booking.status === BookingStatus.PENDING
-              ? "PENDING"
-              : "SUCCEEDED",
+        amount: paymentAmount(booking.totalPrice),
+        currency: PAYMENT_CURRENCY,
+        status,
         stripeSessionId: `seed-session-${booking.id}`,
         stripePaymentIntentId:
-          booking.status === BookingStatus.CANCELLED
-            ? `seed-intent-failed-${booking.id}`
-            : `seed-intent-${booking.id}`,
+          status === PaymentStatus.SUCCEEDED ? `seed-intent-${booking.id}` : null,
       },
     });
   }
@@ -957,66 +674,35 @@ async function seedBookingsAndPayments(
 }
 
 async function seedNotifications(
-  users: Array<{ id: number; email: string; name: string | null }>,
-  bookings: Array<{
-    id: number;
-    userId: number;
-    roomId: number | null;
-    restaurantId: number | null;
-    status: BookingStatus;
-  }>,
+  users: SeedUserRow[],
+  notifications: SeedNotification[],
+  bookings: SeedBookingRow[],
 ) {
-  const notifications = [
-    {
-      email: "user@example.com",
-      title: "Room booking confirmed",
-      body: "Your Bayview Grand Resort reservation is confirmed for the selected dates.",
-      metadata: { type: "booking", category: "hotel" },
-    },
-    {
-      email: "user@example.com",
-      title: "Review your stay",
-      body: "Share feedback for your recent hotel booking to help future guests.",
-      metadata: { type: "review_request", category: "hotel" },
-    },
-    {
-      email: "sadia@example.com",
-      title: "Restaurant reservation confirmed",
-      body: "Your rooftop dining booking is ready for this evening.",
-      metadata: { type: "booking", category: "restaurant" },
-    },
-    {
-      email: "farhan@example.com",
-      title: "Payment completed",
-      body: "Your restaurant payment was processed successfully.",
-      metadata: { type: "payment", category: "restaurant" },
-    },
-    {
-      email: "staff@example.com",
-      title: "New booking assigned",
-      body: "A new reservation needs front desk attention.",
-      metadata: { type: "ops", category: "hotel" },
-    },
-    {
-      email: "nabila@example.com",
-      title: "Trip reminder",
-      body: "Your upcoming booking is scheduled for this week.",
-      metadata: { type: "reminder", category: "travel" },
-    },
-  ];
+  const bookingByUserId = new Map<number, SeedBookingRow[]>();
+
+  for (const booking of bookings) {
+    const existing = bookingByUserId.get(booking.userId) ?? [];
+    existing.push(booking);
+    bookingByUserId.set(booking.userId, existing);
+  }
 
   for (const note of notifications) {
     const user = users.find((entry) => entry.email === note.email);
+
     if (!user) {
       throw new Error(`Missing notification user ${note.email}`);
     }
+
+    const relevantBooking = bookingByUserId.get(user.id)?.[0];
 
     await prisma.notification.create({
       data: {
         userId: user.id,
         title: note.title,
         body: note.body,
-        metadata: note.metadata,
+        metadata: relevantBooking
+          ? ({ ...note.metadata, bookingId: relevantBooking.id } as Prisma.InputJsonValue)
+          : (note.metadata as Prisma.InputJsonValue),
         read: false,
       },
     });
@@ -1028,14 +714,13 @@ async function main() {
   await seedPermissionsAndRoles();
 
   const users = await seedUsers();
-  const hotels = await seedHotels();
-  const restaurants = await seedRestaurants();
-  await seedReviews(users, hotels, restaurants);
-  const bookings = await seedBookingsAndPayments(users, hotels, restaurants);
-  await seedNotifications(users, bookings);
+
+  for (const tenantSeed of tenantSeeds) {
+    await seedTenant(tenantSeed, users);
+  }
 
   console.log(
-    "Seeded demo data for permissions, roles, users, hotels, rooms, restaurants, reviews, bookings, payments, and notifications.",
+    "Seeded demo data for permissions, roles, users, multiple tenants, properties, rooms, reviews, bookings, payments, and notifications.",
   );
 }
 
