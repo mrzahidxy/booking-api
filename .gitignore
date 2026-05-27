@@ -1,12 +1,15 @@
 node_modules/
 dist/
 logs/
+coverage/
 
 .env
+.env.*
 .env.local
 .env.development.local
 .env.production.local
 .env.test.local
+!.env.example
 
 *.log
 npm-debug.log*
@@ -17,5 +20,6 @@ pnpm-debug.log*
 src/config/firebase-admin.json
 
 .DS_Store
+Thumbs.db
 *.tsbuildinfo
 

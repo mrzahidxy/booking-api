@@ -5,7 +5,7 @@ const envSchema = z.object({
   NODE_ENV: z
     .enum(["development", "test", "production"])
     .default("development"),
-  PORT: z.coerce.number().default(8000),
+  PORT: z.coerce.number().default(8080),
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
   JWT_SECRET: z.string().min(1, "JWT_SECRET is required"),
 
@@ -22,6 +22,7 @@ const envSchema = z.object({
   FRONTEND_URL: z.string().default("http://localhost:3000"),
 
   FIREBASE_SERVICE_ACCOUNT_JSON: z.string().optional(),
+  SERVER_URL: z.string().url().optional(),
 });
 
 let cachedEnv: z.infer<typeof envSchema> | null = null;

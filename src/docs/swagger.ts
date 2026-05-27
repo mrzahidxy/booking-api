@@ -4,21 +4,8 @@ import env from "../utils/env";
 const resolveServerUrls = () => {
   const servers: { url: string; description: string }[] = [];
 
-  const renderProductionUrl = process.env.RENDER_EXTERNAL_URL;
-  const renderStagingUrl = process.env.RENDER_STAGING_URL;
-  const productionUrl =
-    process.env.API_BASE_URL ||
-    process.env.SERVER_URL ||
-    process.env.PRODUCTION_URL;
-
-  if (renderProductionUrl) {
-    servers.push({ url: renderProductionUrl, description: "Render Production" });
-  }
-  if (renderStagingUrl) {
-    servers.push({ url: renderStagingUrl, description: "Render Staging" });
-  }
-  if (!renderProductionUrl && !renderStagingUrl && productionUrl) {
-    servers.push({ url: productionUrl, description: "Production" });
+  if (env.SERVER_URL) {
+    servers.push({ url: env.SERVER_URL, description: "Production" });
   }
 
   servers.push({

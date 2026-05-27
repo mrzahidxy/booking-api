@@ -11,7 +11,7 @@
     "postinstall": "prisma generate && npm run build",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "prisma:deploy": "prisma migrate deploy",
+    "prisma:deploy": "npx prisma migrate deploy",
     "prisma:push": "prisma db push",
     "seed": "ts-node prisma/seed.ts"
   },
@@ -47,6 +47,7 @@
     "multer": "^1.4.5-lts.1",
     "multer-storage-cloudinary": "^4.0.0",
     "nodemon": "^3.1.4",
+    "prisma": "^5.19.1",
     "stripe": "^18.2.1",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1",
