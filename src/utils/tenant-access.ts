@@ -110,3 +110,14 @@ export const resolveTenantId = (
 export const canManageTenantData = (user?: TenantAwareUser | null) => {
   return isPlatformAdmin(user) || getPrimaryTenantId(user) !== null;
 };
+
+export const hasTenantRole = (
+  user: TenantAwareUser | null | undefined,
+  roles: Array<TenantMembership["role"]> | TenantMembership["role"]
+) => {
+  const allowedRoles = Array.isArray(roles) ? roles : [roles];
+  return Boolean(
+    user?.tenantMembership &&
+      allowedRoles.includes(user.tenantMembership.role)
+  );
+};

@@ -258,3 +258,174 @@ export const updateAdminTenantStatusService = async (tenantId: number, isActive:
     updatedTenant
   );
 };
+
+export const getAdminTenantMembersService = async (tenantId: number) => {
+  const tenant = await prisma.tenant.findUnique({
+    where: { id: tenantId },
+    select: { id: true, name: true, slug: true, isActive: true },
+  });
+
+  if (!tenant) {
+    throw new NotFoundException("Tenant not found", ErrorCode.BAD_REQUEST);
+  }
+
+  const members = await prisma.tenantMember.findMany({
+    where: { tenantId },
+    orderBy: [{ role: "asc" }, { createdAt: "asc" }],
+    include: {
+      tenant: true,
+      user: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          phone: true,
+          roleId: true,
+          createdAt: true,
+          updateAt: true,
+        },
+      },
+    },
+  });
+
+  return new HTTPSuccessResponse("Tenant members fetched successfully", 200, {
+    tenant,
+    collection: members,
+  });
+};
+
+export const createAdminTenantMemberService = async (
+  tenantId: number,
+  payload: { userId: number; role: TenantMemberRole }
+) => {
+  const tenant = await prisma.tenant.findUnique({
+    where: { id: tenantId },
+    select: { id: true, name: true, slug: true, isActive: true },
+  });
+
+  if (!tenant) {
+    throw new NotFoundException("Tenant not found", ErrorCode.BAD_REQUEST);
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: payload.userId },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      phone: true,
+      roleId: true,
+      createdAt: true,
+      updateAt: true,
+      tenantMemberships: {
+        select: {
+          id: true,
+          tenantId: true,
+          role: true,
+        },
+      },
+    },
+  });
+
+  if (!user) {
+    throw new NotFoundException("User not found", ErrorCode.USER_NOT_FOUND);
+  }
+
+  if (user.tenantMemberships.length > 0) {
+    throw new BadRequestException(
+      "User already has a tenant membership",
+      ErrorCode.BAD_REQUEST
+    );
+  }
+
+  const member = await prisma.tenantMember.create({
+    data: {
+      tenantId,
+      userId: payload.userId,
+      role: payload.role,
+    },
+    include: {
+      tenant: true,
+      user: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          phone: true,
+          roleId: true,
+          createdAt: true,
+          updateAt: true,
+        },
+      },
+    },
+  });
+
+  return new HTTPSuccessResponse("Tenant member created successfully", 201, member);
+};
+
+export const updateAdminTenantMemberRoleService = async (
+  tenantId: number,
+  memberId: number,
+  role: TenantMemberRole
+) => {
+  const member = await prisma.tenantMember.findFirst({
+    where: {
+      id: memberId,
+      tenantId,
+    },
+  });
+
+  if (!member) {
+    throw new NotFoundException("Tenant member not found", ErrorCode.BAD_REQUEST);
+  }
+
+  if (member.role === role) {
+    throw new BadRequestException(
+      "Tenant member already has this role",
+      ErrorCode.BAD_REQUEST
+    );
+  }
+
+  const updatedMember = await prisma.tenantMember.update({
+    where: { id: memberId },
+    data: { role },
+    include: {
+      tenant: true,
+      user: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          phone: true,
+          roleId: true,
+          createdAt: true,
+          updateAt: true,
+        },
+      },
+    },
+  });
+
+  return new HTTPSuccessResponse("Tenant member role updated successfully", 200, updatedMember);
+};
+
+export const deleteAdminTenantMemberService = async (tenantId: number, memberId: number) => {
+  const member = await prisma.tenantMember.findFirst({
+    where: {
+      id: memberId,
+      tenantId,
+    },
+  });
+
+  if (!member) {
+    throw new NotFoundException("Tenant member not found", ErrorCode.BAD_REQUEST);
+  }
+
+  await prisma.tenantMember.delete({
+    where: { id: memberId },
+  });
+
+  return new HTTPSuccessResponse("Tenant member removed successfully", 200, {
+    id: memberId,
+    tenantId,
+  });
+};
