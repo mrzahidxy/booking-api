@@ -12,9 +12,10 @@ export const getMessaging = () => {
     throw new Error("FIREBASE_SERVICE_ACCOUNT_JSON environment variable is not set");
   }
 
-  const serviceAccount = JSON.parse(
-    Buffer.from(serviceAccountJson, "base64").toString("utf-8")
-  );
+  const normalizedServiceAccount = serviceAccountJson.trim().startsWith("{")
+    ? serviceAccountJson
+    : Buffer.from(serviceAccountJson, "base64").toString("utf-8");
+  const serviceAccount = JSON.parse(normalizedServiceAccount);
 
   if (!admin.apps.length) {
     admin.initializeApp({
