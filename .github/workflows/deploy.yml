@@ -57,6 +57,18 @@ jobs:
             docker compose pull
             docker compose run --rm ${{ env.COMPOSE_SERVICE }} npx prisma migrate deploy
             docker compose up -d ${{ env.COMPOSE_SERVICE }}
+            for i in $(seq 1 24); do
+              STATUS=$(docker inspect --format '{{.State.Health.Status}}' "$(docker compose ps -q ${{ env.COMPOSE_SERVICE }})")
+              [ "$STATUS" = "healthy" ] && break
+              [ "$STATUS" = "unhealthy" ] && break
+              sleep 5
+            done
+            if [ "$STATUS" != "healthy" ]; then
+              echo "Container health check failed: ${STATUS:-unknown}"
+              docker compose ps
+              docker compose logs --no-color ${{ env.COMPOSE_SERVICE }}
+              exit 1
+            fi
             docker image prune -f
             curl -fsS ${{ env.LOCAL_HEALTHCHECK_URL }}
             curl -fsS ${{ env.PUBLIC_HEALTHCHECK_URL }}
