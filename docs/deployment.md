@@ -22,7 +22,24 @@ This API is deployed from GitHub Actions by building and pushing Docker images t
 - App directory: `/opt/apps/booking-api`
 - Docker Compose service name: `api`
 - Container runtime port: `PORT=8080`
-- Expected VPS port mapping: `127.0.0.1:8081:8080`
+- Expected VPS port mapping: `127.0.0.1:8082:8080`
+
+Recommended Compose healthcheck:
+
+```yaml
+services:
+  api:
+    ports:
+      - "127.0.0.1:8082:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+```
+
+Use `docker exec -it booking-api sh` for shell access inside the running Alpine container.
 
 ## Deployment Flow
 
@@ -35,7 +52,7 @@ The GitHub Actions workflow:
 5. Runs `docker compose up -d api`.
 6. Runs `docker image prune -f`.
 7. Checks:
-   - `http://127.0.0.1:8081/health`
+   - `http://127.0.0.1:8082/health`
    - `https://menu-api.flowstacker.xyz/health`
 
 ## Rollback

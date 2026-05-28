@@ -12,8 +12,8 @@ env:
   IMAGE_NAME: zayedsagor/booking-api
   APP_DIR: /opt/apps/booking-api
   COMPOSE_SERVICE: api
-  LOCAL_HEALTHCHECK_URL: http://127.0.0.1:8081/health
-  PUBLIC_HEALTHCHECK_URL: https://menu-api.flowstacker.xyz/health
+  LOCAL_HEALTHCHECK_URL: http://127.0.0.1:8082/health
+  PUBLIC_HEALTHCHECK_URL: https://booking-api.flowstacker.xyz/health
 
 jobs:
   deploy:
