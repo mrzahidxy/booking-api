@@ -1,4 +1,4 @@
-import { Prisma } from "@prisma/client";
+import { Prisma, PropertyKind, RoomType } from "@prisma/client";
 import { z } from "zod";
 import { BadRequestException } from "../exceptions/bad-request";
 import { NotFoundException } from "../exceptions/not-found";
@@ -6,37 +6,91 @@ import { ErrorCode } from "../exceptions/root";
 import { HTTPSuccessResponse } from "../helpers/success-response";
 import { formatPaginationResponse } from "../utils/common-method";
 import prisma from "../utils/prisma";
-import { hotelSchema, roomSchema, RoomType } from "../schemas/hotels";
+import { resolveUniqueSlug } from "../utils/slug";
+import { buildPropertyWhere, resolvePropertyIdentifierWhere } from "../utils/property-query";
+import { hotelSchema, roomSchema } from "../schemas/hotels";
 
 type HotelPayload = z.infer<typeof hotelSchema>;
+
+const HOTEL_KIND = PropertyKind.HOTEL;
 
 export const upsertHotel = async (params: {
   hotelId: number | null;
   data: HotelPayload;
+  tenantId: number;
 }) => {
   const { name, location, description, amenities, image, rooms } = params.data;
+  const slug = await resolveUniqueSlug(name, async (candidate) => {
+    const existing = await prisma.property.findFirst({
+      where: {
+        slug: candidate,
+        ...(params.hotelId ? { NOT: { id: params.hotelId } } : {}),
+      },
+      select: { id: true },
+    });
+
+    return Boolean(existing);
+  });
+
+  const existingProperty = params.hotelId
+    ? await prisma.property.findFirst({
+        where: { id: params.hotelId, tenantId: params.tenantId },
+      })
+    : await prisma.property.findUnique({
+        where: { tenantId: params.tenantId },
+      });
+
+  if (existingProperty && existingProperty.kind !== HOTEL_KIND) {
+    throw new BadRequestException("Tenant is already configured as a restaurant", ErrorCode.BAD_REQUEST);
+  }
 
   let hotel;
 
-  if (params.hotelId) {
-    hotel = await prisma.hotel.update({
-      where: { id: params.hotelId },
-      data: { name, location, image, description, amenities },
+  if (existingProperty) {
+    hotel = await prisma.property.update({
+      where: { id: existingProperty.id },
+      data: {
+        kind: HOTEL_KIND,
+        name,
+        slug,
+        location,
+        image: image ?? [],
+        description,
+        amenities: amenities ?? [],
+        cuisine: [],
+        timeSlots: [],
+        seats: null,
+        menu: Prisma.DbNull,
+        tenantId: params.tenantId,
+      },
     });
   } else {
-    hotel = await prisma.hotel.create({
-      data: { name, location, image, description, amenities },
+    hotel = await prisma.property.create({
+      data: {
+        tenantId: params.tenantId,
+        kind: HOTEL_KIND,
+        slug,
+        name,
+        location,
+        image: image ?? [],
+        description,
+        amenities: amenities ?? [],
+        cuisine: [],
+        timeSlots: [],
+        seats: null,
+        menu: Prisma.DbNull,
+      },
     });
   }
 
-  if (rooms?.length) {
+  if (rooms !== undefined) {
     const validRooms = rooms
       .map((room) => roomSchema.safeParse(room))
       .filter((res) => res.success)
       .map((res) => res.data);
 
     const existingRooms = await prisma.room.findMany({
-      where: { hotelId: hotel.id },
+      where: { propertyId: hotel.id },
       select: { id: true },
     });
 
@@ -46,29 +100,50 @@ export const upsertHotel = async (params: {
     const roomsToDelete = [...existingRoomIds].filter((id) => !incomingRoomIds.has(id));
 
     if (roomsToDelete.length > 0) {
-      await prisma.room.deleteMany({
-        where: { id: { in: roomsToDelete } },
-      });
+      try {
+        await prisma.room.deleteMany({
+          where: { id: { in: roomsToDelete } },
+        });
+      } catch (error) {
+        if (
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          error.code === "P2003"
+        ) {
+          throw new BadRequestException(
+            "Room cannot be deleted while it has existing bookings",
+            ErrorCode.BAD_REQUEST
+          );
+        }
+
+        throw error;
+      }
     }
 
     await Promise.all(
       validRooms.map(async ({ id, roomType, price, image, amenities, quantity }) => {
         if (id) {
+          if (!existingRoomIds.has(id)) {
+            throw new BadRequestException("Room does not belong to this hotel", ErrorCode.BAD_REQUEST);
+          }
+
           await prisma.room.update({
             where: { id },
-            data: { roomType, price: +price, image, amenities, quantity },
+            data: { roomType, price: +price, image: image ?? [], amenities: amenities ?? [], quantity },
           });
         } else {
           await prisma.room.create({
-            data: { hotelId: hotel.id, roomType, price: +price, image, amenities, quantity },
+            data: {
+              propertyId: hotel.id,
+              roomType,
+              price: +price,
+              image: image ?? [],
+              amenities: amenities ?? [],
+              quantity,
+            },
           });
         }
       })
     );
-  } else {
-    await prisma.room.deleteMany({
-      where: { hotelId: hotel.id },
-    });
   }
 
   return new HTTPSuccessResponse(
@@ -78,9 +153,12 @@ export const upsertHotel = async (params: {
   );
 };
 
-export const removeHotel = async (hotelId: number) => {
-  const hotel = await prisma.hotel.findUnique({
-    where: { id: hotelId },
+export const removeHotel = async (hotelId: number, tenantId?: number | null) => {
+  const hotel = await prisma.property.findFirst({
+    where: {
+      id: hotelId,
+      ...buildPropertyWhere(HOTEL_KIND, tenantId),
+    },
     include: { rooms: true },
   });
 
@@ -88,33 +166,50 @@ export const removeHotel = async (hotelId: number) => {
     throw new NotFoundException("Hotel not found", ErrorCode.HOTEL_NOT_FOUND);
   }
 
-  await prisma.room.deleteMany({
-    where: { hotelId },
-  });
+  try {
+    await prisma.property.delete({
+      where: { id: hotelId },
+    });
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2003"
+    ) {
+      throw new BadRequestException(
+        "Hotel cannot be deleted while it has existing bookings",
+        ErrorCode.BAD_REQUEST
+      );
+    }
 
-  await prisma.hotel.delete({
-    where: { id: hotelId },
-  });
+    throw error;
+  }
 
   return new HTTPSuccessResponse("Hotel deleted successfully", 200, hotel);
 };
 
-export const fetchHotels = async (params: { page?: number; limit?: number }) => {
+export const fetchHotels = async (params: { page?: number; limit?: number; tenantId?: number | null }) => {
   const page = params.page ?? 1;
   const limit = params.limit ?? 10;
   const skip = (page - 1) * limit;
 
-  const hotels = await prisma.hotel.findMany({ skip, take: limit, include: { rooms: true } });
-  const totalHotels = await prisma.hotel.count();
+  const whereClause = buildPropertyWhere(HOTEL_KIND, params.tenantId);
+  const hotels = await prisma.property.findMany({
+    skip,
+    take: limit,
+    include: { rooms: true },
+    where: whereClause,
+  });
+  const totalHotels = await prisma.property.count({ where: whereClause });
 
   const formattedResponse = formatPaginationResponse(hotels ?? [], totalHotels, page, limit);
 
   return new HTTPSuccessResponse("Hotels fetched successfully", 200, formattedResponse);
 };
 
-export const fetchHotelDetails = async (hotelId: number) => {
-  const hotel = await prisma.hotel.findUnique({
-    where: { id: hotelId },
+export const fetchHotelDetails = async (hotelIdentifier: string, tenantId?: number | null) => {
+  const identifierWhere = resolvePropertyIdentifierWhere(hotelIdentifier);
+  const hotel = await prisma.property.findFirst({
+    where: { ...identifierWhere, ...buildPropertyWhere(HOTEL_KIND, tenantId) },
     include: {
       rooms: true,
       reviews: {
@@ -126,6 +221,29 @@ export const fetchHotelDetails = async (hotelId: number) => {
   });
 
   if (!hotel) {
+    const parsedId = Number(hotelIdentifier);
+    const fallbackWhere = Number.isInteger(parsedId)
+      ? { id: parsedId, ...buildPropertyWhere(HOTEL_KIND, tenantId) }
+      : null;
+
+    if (fallbackWhere) {
+      const hotelById = await prisma.property.findFirst({
+        where: fallbackWhere,
+        include: {
+          rooms: true,
+          reviews: {
+            include: {
+              user: true,
+            },
+          },
+        },
+      });
+
+      if (hotelById) {
+        return new HTTPSuccessResponse("Hotel details fetched successfully", 200, hotelById);
+      }
+    }
+
     throw new NotFoundException("Hotel not found", ErrorCode.HOTEL_NOT_FOUND);
   }
 
@@ -140,12 +258,14 @@ export const searchHotels = async (params: {
   name?: string;
   page?: number;
   limit?: number;
+  tenantId?: number | null;
 }) => {
   const page = params.page ?? 1;
   const limit = params.limit ?? 10;
   const skip = (page - 1) * limit;
 
   const whereClause = {
+    ...buildPropertyWhere(HOTEL_KIND, params.tenantId),
     ...(params.location && {
       location: {
         contains: params.location,
@@ -167,14 +287,14 @@ export const searchHotels = async (params: {
     },
   };
 
-  const hotels = await prisma.hotel.findMany({
+  const hotels = await prisma.property.findMany({
     where: whereClause,
     include: { rooms: true },
     skip,
     take: limit,
   });
 
-  const totalHotels = await prisma.hotel.count({
+  const totalHotels = await prisma.property.count({
     where: whereClause,
   });
 
@@ -226,7 +346,7 @@ export const checkRoomAvailabilityService = async (params: {
 
   const availAbality = room.quantity - totalBookedRooms;
 
-  return new HTTPSuccessResponse("Table availability checked successfully", 200, {
+  return new HTTPSuccessResponse("Room availability checked successfully", 200, {
     isAvailable,
     availAbality,
   });

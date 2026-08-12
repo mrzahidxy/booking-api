@@ -4,21 +4,8 @@ import env from "../utils/env";
 const resolveServerUrls = () => {
   const servers: { url: string; description: string }[] = [];
 
-  const renderProductionUrl = process.env.RENDER_EXTERNAL_URL;
-  const renderStagingUrl = process.env.RENDER_STAGING_URL;
-  const productionUrl =
-    process.env.API_BASE_URL ||
-    process.env.SERVER_URL ||
-    process.env.PRODUCTION_URL;
-
-  if (renderProductionUrl) {
-    servers.push({ url: renderProductionUrl, description: "Render Production" });
-  }
-  if (renderStagingUrl) {
-    servers.push({ url: renderStagingUrl, description: "Render Staging" });
-  }
-  if (!renderProductionUrl && !renderStagingUrl && productionUrl) {
-    servers.push({ url: productionUrl, description: "Production" });
+  if (env.SERVER_URL) {
+    servers.push({ url: env.SERVER_URL, description: "Production" });
   }
 
   servers.push({
@@ -35,19 +22,19 @@ const swaggerDefinition = {
     title: "Booking App API",
     version: "1.0.0",
     description:
-      "API documentation for the Booking App (hotels, restaurants, bookings, payments, notifications, roles, and users).",
+      "API documentation for the Booking App (properties, bookings, payments, notifications, admin, roles, and users).",
   },
   servers: resolveServerUrls(),
   tags: [
     { name: "Health" },
     { name: "Auth" },
-    { name: "Hotels" },
-    { name: "Restaurants" },
+    { name: "Properties" },
     { name: "Bookings" },
     { name: "Payments" },
     { name: "Images" },
     { name: "Notifications" },
     { name: "Reviews" },
+    { name: "Admin" },
     { name: "Roles & Permissions" },
     { name: "Users" },
   ],
@@ -144,7 +131,8 @@ const swaggerDefinition = {
       ReservationRequest: {
         type: "object",
         properties: {
-          restaurantId: { type: "integer" },
+          propertyId: { type: "integer" },
+          restaurantId: { type: "integer", deprecated: true },
           bookingDate: { type: "string", format: "date-time" },
           timeSlot: {
             type: "string",
@@ -152,7 +140,7 @@ const swaggerDefinition = {
           },
           partySize: { type: "integer" },
         },
-        required: ["restaurantId", "bookingDate", "timeSlot", "partySize"],
+        required: ["propertyId", "bookingDate", "timeSlot", "partySize"],
       },
       RoomBookingRequest: {
         type: "object",
@@ -177,13 +165,13 @@ const swaggerDefinition = {
       ReviewRequest: {
         type: "object",
         properties: {
-          userId: { type: "integer" },
-          hotelId: { type: "integer" },
-          restaurantId: { type: "integer" },
+          propertyId: { type: "integer" },
+          hotelId: { type: "integer", deprecated: true },
+          restaurantId: { type: "integer", deprecated: true },
           rating: { type: "integer", minimum: 1, maximum: 5 },
           review: { type: "string" },
         },
-        required: ["userId", "rating"],
+        required: ["propertyId", "rating", "review"],
       },
       AssignPermissionsRequest: {
         type: "object",
@@ -205,12 +193,118 @@ const swaggerDefinition = {
         properties: { fcmToken: { type: "string" } },
         required: ["fcmToken"],
       },
-      CheckoutSessionResponse: {
+      TenantStatusUpdateRequest: {
+        type: "object",
+        properties: {
+          isActive: { type: "boolean" },
+        },
+        required: ["isActive"],
+      },
+      CreateOwnerRequest: {
+        type: "object",
+        properties: {
+          userId: { type: "integer", example: 12 },
+          tenantName: { type: "string" },
+          tenantSlug: { type: "string", description: "Optional custom slug for the tenant" },
+        },
+        required: ["userId", "tenantName"],
+      },
+      CreateOwnerData: {
+        type: "object",
+        properties: {
+          user: {
+            type: "object",
+            properties: {
+              id: { type: "integer", example: 1 },
+              email: { type: "string", example: "owner@example.com" },
+              name: { type: "string", example: "Tenant Owner" },
+              phone: { type: "string", nullable: true, example: "01711000002" },
+              roleId: { type: "integer", example: 2 },
+              fcmToken: { type: "string", nullable: true },
+              createdAt: { type: "string", format: "date-time" },
+              updateAt: { type: "string", format: "date-time" },
+            },
+          },
+          tenant: {
+            type: "object",
+            properties: {
+              id: { type: "integer", example: 1 },
+              name: { type: "string", example: "My Hotel" },
+              slug: { type: "string", example: "my-hotel" },
+              isActive: { type: "boolean", example: true },
+              createdAt: { type: "string", format: "date-time" },
+              updatedAt: { type: "string", format: "date-time" },
+            },
+          },
+          tenantMembership: {
+            type: "object",
+            properties: {
+              id: { type: "integer", example: 1 },
+              tenantId: { type: "integer", example: 1 },
+              userId: { type: "integer", example: 1 },
+              role: { type: "string", enum: ["OWNER", "STAFF"] },
+              createdAt: { type: "string", format: "date-time" },
+              updatedAt: { type: "string", format: "date-time" },
+              tenant: {
+                type: "object",
+                nullable: true,
+                properties: {
+                  id: { type: "integer", example: 1 },
+                  name: { type: "string", example: "My Hotel" },
+                  slug: { type: "string", example: "my-hotel" },
+                  isActive: { type: "boolean", example: true },
+                },
+              },
+            },
+          },
+        },
+      },
+      CreateOwnerResponse: {
+        type: "object",
+        properties: {
+          message: { type: "string", example: "Owner created successfully" },
+          statusCode: { type: "integer", example: 201 },
+          data: { $ref: "#/components/schemas/CreateOwnerData" },
+        },
+        required: ["message", "statusCode", "data"],
+      },
+      CreateCheckoutSessionResponse: {
         type: "object",
         properties: {
           sessionId: { type: "string" },
+          paymentStatus: { type: "string" },
         },
-        required: ["sessionId"],
+        required: ["sessionId", "paymentStatus"],
+      },
+      CheckoutSessionResponse: {
+        type: "object",
+        properties: {
+          bookingId: { type: "integer" },
+          bookingStatus: { type: "string" },
+          paymentStatus: { type: "string" },
+          currency: { type: "string" },
+          amount: { type: "number" },
+          stripeStatus: { type: "string" },
+          stripePaymentStatus: { type: "string" },
+        },
+        required: [
+          "bookingId",
+          "bookingStatus",
+          "paymentStatus",
+          "currency",
+          "amount",
+          "stripeStatus",
+          "stripePaymentStatus",
+        ],
+      },
+      CancelCheckoutSessionResponse: {
+        type: "object",
+        properties: {
+          bookingId: { type: "integer" },
+          bookingStatus: { type: "string" },
+          paymentStatus: { type: "string" },
+        },
+        required: ["bookingId", "bookingStatus", "paymentStatus"],
       },
     },
   },
@@ -270,10 +364,10 @@ const swaggerDefinition = {
         },
       },
     },
-    "/api/hotels": {
+    "/api/properties/hotels": {
       get: {
-        tags: ["Hotels"],
-        summary: "List hotels",
+        tags: ["Properties"],
+        summary: "List hotel properties",
         parameters: [
           { in: "query", name: "page", schema: { type: "integer" } },
           { in: "query", name: "limit", schema: { type: "integer" } },
@@ -288,8 +382,8 @@ const swaggerDefinition = {
         },
       },
       post: {
-        tags: ["Hotels"],
-        summary: "Create hotel",
+        tags: ["Properties"],
+        summary: "Create hotel property",
         security: [{ BearerAuth: [] }],
         requestBody: {
           required: true,
@@ -308,10 +402,10 @@ const swaggerDefinition = {
         },
       },
     },
-    "/api/hotels/{id}": {
+    "/api/properties/hotels/{id}": {
       get: {
-        tags: ["Hotels"],
-        summary: "Get hotel details",
+        tags: ["Properties"],
+        summary: "Get hotel property details",
         parameters: [
           { in: "path", name: "id", required: true, schema: { type: "integer" } },
         ],
@@ -326,8 +420,8 @@ const swaggerDefinition = {
         },
       },
       put: {
-        tags: ["Hotels"],
-        summary: "Update hotel",
+        tags: ["Properties"],
+        summary: "Update hotel property",
         security: [{ BearerAuth: [] }],
         parameters: [
           { in: "path", name: "id", required: true, schema: { type: "integer" } },
@@ -348,8 +442,8 @@ const swaggerDefinition = {
         },
       },
       delete: {
-        tags: ["Hotels"],
-        summary: "Delete hotel",
+        tags: ["Properties"],
+        summary: "Delete hotel property",
         security: [{ BearerAuth: [] }],
         parameters: [
           { in: "path", name: "id", required: true, schema: { type: "integer" } },
@@ -359,10 +453,10 @@ const swaggerDefinition = {
         },
       },
     },
-    "/api/hotels/search/result": {
+    "/api/properties/hotels/search/result": {
       get: {
-        tags: ["Hotels"],
-        summary: "Search hotels",
+        tags: ["Properties"],
+        summary: "Search hotel properties",
         parameters: [
           { in: "query", name: "location", schema: { type: "string" } },
           { in: "query", name: "name", schema: { type: "string" } },
@@ -382,25 +476,10 @@ const swaggerDefinition = {
         },
       },
     },
-    "/api/hotels/booked": {
+    "/api/properties/restaurants": {
       get: {
-        tags: ["Hotels"],
-        summary: "Check room availability",
-        parameters: [
-          { in: "query", name: "roomId", schema: { type: "integer" }, required: true },
-          { in: "query", name: "date", schema: { type: "string", format: "date" }, required: true },
-          { in: "query", name: "quantity", schema: { type: "integer" }, required: true },
-        ],
-        responses: {
-          200: { description: "Availability result" },
-          400: { description: "Missing parameters" },
-        },
-      },
-    },
-    "/api/restaurants": {
-      get: {
-        tags: ["Restaurants"],
-        summary: "List restaurants",
+        tags: ["Properties"],
+        summary: "List restaurant properties",
         parameters: [
           { in: "query", name: "page", schema: { type: "integer" } },
           { in: "query", name: "limit", schema: { type: "integer" } },
@@ -415,8 +494,8 @@ const swaggerDefinition = {
         },
       },
       post: {
-        tags: ["Restaurants"],
-        summary: "Create restaurant",
+        tags: ["Properties"],
+        summary: "Create restaurant property",
         security: [{ BearerAuth: [] }],
         requestBody: {
           required: true,
@@ -427,7 +506,7 @@ const swaggerDefinition = {
           },
         },
         responses: {
-          200: {
+          201: {
             description: "Restaurant created",
             content: {
               "application/json": { schema: { $ref: "#/components/schemas/ApiResponse" } },
@@ -436,10 +515,10 @@ const swaggerDefinition = {
         },
       },
     },
-    "/api/restaurants/{id}": {
+    "/api/properties/restaurants/{id}": {
       get: {
-        tags: ["Restaurants"],
-        summary: "Get restaurant details",
+        tags: ["Properties"],
+        summary: "Get restaurant property details",
         parameters: [
           { in: "path", name: "id", required: true, schema: { type: "integer" } },
         ],
@@ -449,8 +528,8 @@ const swaggerDefinition = {
         },
       },
       put: {
-        tags: ["Restaurants"],
-        summary: "Update restaurant",
+        tags: ["Properties"],
+        summary: "Update restaurant property",
         security: [{ BearerAuth: [] }],
         parameters: [
           { in: "path", name: "id", required: true, schema: { type: "integer" } },
@@ -479,11 +558,22 @@ const swaggerDefinition = {
           200: { description: "Restaurant updated" },
         },
       },
+      delete: {
+        tags: ["Properties"],
+        summary: "Delete restaurant property",
+        security: [{ BearerAuth: [] }],
+        parameters: [
+          { in: "path", name: "id", required: true, schema: { type: "integer" } },
+        ],
+        responses: {
+          200: { description: "Restaurant deleted" },
+        },
+      },
     },
-    "/api/restaurants/search/result": {
+    "/api/properties/restaurants/search/result": {
       get: {
-        tags: ["Restaurants"],
-        summary: "Search restaurants",
+        tags: ["Properties"],
+        summary: "Search restaurant properties",
         parameters: [
           { in: "query", name: "name", schema: { type: "string" } },
           { in: "query", name: "location", schema: { type: "string" } },
@@ -502,7 +592,8 @@ const swaggerDefinition = {
         tags: ["Bookings"],
         summary: "Check restaurant table availability",
         parameters: [
-          { in: "query", name: "restaurantId", required: true, schema: { type: "integer" } },
+          { in: "query", name: "propertyId", required: true, schema: { type: "integer" } },
+          { in: "query", name: "restaurantId", schema: { type: "integer", deprecated: true } },
           { in: "query", name: "date", required: true, schema: { type: "string", format: "date" } },
           { in: "query", name: "partySize", schema: { type: "integer" } },
           {
@@ -619,6 +710,92 @@ const swaggerDefinition = {
         },
       },
     },
+    "/api/admin/stats": {
+      get: {
+        tags: ["Admin"],
+        summary: "Get admin dashboard stats",
+        security: [{ BearerAuth: [] }],
+        responses: {
+          200: { description: "Dashboard stats" },
+        },
+      },
+    },
+    "/api/admin/owners": {
+      post: {
+        tags: ["Admin"],
+        summary: "Create a tenant for an existing user",
+        security: [{ BearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/CreateOwnerRequest" },
+            },
+          },
+        },
+        responses: {
+          201: {
+            description: "Owner created",
+            content: {
+              "application/json": { schema: { $ref: "#/components/schemas/CreateOwnerResponse" } },
+            },
+          },
+          400: { description: "Validation error or duplicate user" },
+          401: { description: "Platform admin access required" },
+        },
+      },
+    },
+    "/api/admin/tenants": {
+      get: {
+        tags: ["Admin"],
+        summary: "List tenants",
+        security: [{ BearerAuth: [] }],
+        parameters: [
+          { in: "query", name: "page", schema: { type: "integer" } },
+          { in: "query", name: "limit", schema: { type: "integer" } },
+        ],
+        responses: {
+          200: { description: "Tenants list" },
+        },
+      },
+    },
+    "/api/admin/tenants/{id}": {
+      get: {
+        tags: ["Admin"],
+        summary: "Get tenant details",
+        security: [{ BearerAuth: [] }],
+        parameters: [
+          { in: "path", name: "id", required: true, schema: { type: "integer" } },
+        ],
+        responses: {
+          200: { description: "Tenant details" },
+          404: { description: "Tenant not found" },
+        },
+      },
+    },
+    "/api/admin/tenants/{id}/status": {
+      patch: {
+        tags: ["Admin"],
+        summary: "Update tenant status",
+        security: [{ BearerAuth: [] }],
+        parameters: [
+          { in: "path", name: "id", required: true, schema: { type: "integer" } },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/TenantStatusUpdateRequest" },
+            },
+          },
+        },
+        responses: {
+          200: { description: "Tenant status updated" },
+          400: { description: "Invalid tenant status" },
+          404: { description: "Tenant not found" },
+        },
+      },
+    },
     "/api/payments/{id}": {
       post: {
         tags: ["Payments"],
@@ -632,21 +809,64 @@ const swaggerDefinition = {
             description: "Session created",
             content: {
               "application/json": {
-                schema: {
-                  allOf: [
-                    { $ref: "#/components/schemas/ApiResponse" },
-                    {
-                      type: "object",
-                      properties: {
-                        body: { $ref: "#/components/schemas/CheckoutSessionResponse" },
-                      },
-                    },
-                  ],
-                },
+                schema: { $ref: "#/components/schemas/CreateCheckoutSessionResponse" },
               },
             },
           },
           404: { description: "Booking not found" },
+          409: { description: "Booking not payable" },
+        },
+      },
+    },
+    "/api/payments/{bookingId}/cancel": {
+      post: {
+        tags: ["Payments"],
+        summary: "Cancel a pending checkout session",
+        security: [{ BearerAuth: [] }],
+        parameters: [
+          {
+            in: "path",
+            name: "bookingId",
+            required: true,
+            schema: { type: "integer" },
+          },
+        ],
+        responses: {
+          200: {
+            description: "Session cancelled",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/CancelCheckoutSessionResponse" },
+              },
+            },
+          },
+          404: { description: "Booking not found" },
+        },
+      },
+    },
+    "/api/payments/session/{sessionId}": {
+      get: {
+        tags: ["Payments"],
+        summary: "Get checkout session status",
+        security: [{ BearerAuth: [] }],
+        parameters: [
+          {
+            in: "path",
+            name: "sessionId",
+            required: true,
+            schema: { type: "string" },
+          },
+        ],
+        responses: {
+          200: {
+            description: "Session details",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/CheckoutSessionResponse" },
+              },
+            },
+          },
+          404: { description: "Payment not found" },
         },
       },
     },
@@ -724,6 +944,7 @@ const swaggerDefinition = {
         parameters: [
           { in: "query", name: "page", schema: { type: "integer" } },
           { in: "query", name: "limit", schema: { type: "integer" } },
+          { in: "query", name: "propertyId", schema: { type: "integer" } },
           { in: "query", name: "hotelId", schema: { type: "integer" } },
           { in: "query", name: "restaurantId", schema: { type: "integer" } },
         ],
@@ -948,6 +1169,32 @@ const swaggerDefinition = {
         ],
         responses: {
           200: { description: "Users list" },
+        },
+      },
+    },
+    "/api/users/me": {
+      get: {
+        tags: ["Users"],
+        summary: "Get current user",
+        security: [{ BearerAuth: [] }],
+        responses: {
+          200: { description: "Current user" },
+        },
+      },
+      put: {
+        tags: ["Users"],
+        summary: "Update current user",
+        security: [{ BearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { type: "object", additionalProperties: true },
+            },
+          },
+        },
+        responses: {
+          200: { description: "Current user updated" },
         },
       },
     },

@@ -1,41 +1,32 @@
 generator client {
   provider      = "prisma-client-js"
-  binaryTargets = ["native", "debian-openssl-3.0.x", "rhel-openssl-3.0.x"]
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x", "debian-openssl-3.0.x", "rhel-openssl-3.0.x"]
 }
 
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL")
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  // uncomment next line if you use Prisma <5.10
+  // directUrl = env("DATABASE_URL_UNPOOLED")
 }
 
+// Auth and access control
 model User {
-  id           Int            @id @default(autoincrement())
-  email        String         @unique
-  phone        String?
-  password     String
-  createdAt    DateTime       @default(now())
-  name         String?
-  roleId       Int?
-  updateAt     DateTime       @updatedAt
-  bookings     Booking[]
-  role         Role?          @relation(fields: [roleId], references: [id])
-  review       Review[]
-  notification Notification[]
-  fcmToken     String?        @unique
-}
-
-model Notification {
   id        Int      @id @default(autoincrement())
-  user      User     @relation(fields: [userId], references: [id])
-  userId    Int
-  title     String
-  body      String
-  metadata  Json?
-  read      Boolean  @default(false)
+  email     String   @unique
+  phone     String?
+  password  String
+  name      String?
+  roleId    Int?
+  fcmToken  String?  @unique
   createdAt DateTime @default(now())
+  updateAt  DateTime @updatedAt
 
-  @@index([userId, read])
+  role              Role?          @relation(fields: [roleId], references: [id])
+  bookings          Booking[]
+  review            Review[]
+  notification      Notification[]
+  tenantMemberships TenantMember[]
 }
 
 model Role {
@@ -52,83 +43,137 @@ model Permission {
 }
 
 model RolePermission {
-  id           Int        @id @default(autoincrement())
+  id           Int @id @default(autoincrement())
   roleId       Int
   permissionId Int
-  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
-  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
 
   @@unique([roleId, permissionId])
 }
 
-model Hotel {
-  id          Int      @id @default(autoincrement())
+model Notification {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  title     String
+  body      String
+  metadata  Json?
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, read])
+}
+
+// Tenant boundary
+model Tenant {
+  id        Int      @id @default(autoincrement())
+  name      String
+  slug      String   @unique
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members  TenantMember[]
+  property Property?
+  bookings Booking[]
+  payments Payment[]
+}
+
+enum TenantMemberRole {
+  OWNER
+  STAFF
+}
+
+model TenantMember {
+  id        Int              @id @default(autoincrement())
+  tenantId  Int
+  userId    Int
+  role      TenantMemberRole
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId])
+  @@index([tenantId])
+  @@index([userId])
+}
+
+// Business content
+enum PropertyKind {
+  HOTEL
+  RESTAURANT
+}
+
+model Property {
+  id          Int            @id @default(autoincrement())
+  tenantId    Int            @unique
+  kind        PropertyKind
+  slug        String         @unique
   name        String
   location    String
   image       String[]
   description String?
   amenities   String[]
-  createdAt   DateTime @default(now())
-  updateAt    DateTime @updatedAt
-  ratings     Float?   @default(0.0)
-  reviews     Review[]
-  rooms       Room[]
+  cuisine     String[]
+  timeSlots   TimeSlotType[]
+  seats       Int?
+  menu        Json?
+  ratings     Float          @default(0.0)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
 
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  reviews  Review[]
+  rooms    Room[]
+  bookings Booking[]
+
+  @@index([kind])
   @@index([location])
 }
 
 model Room {
-  id        Int       @id @default(autoincrement())
-  hotelId   Int
-  price     Float
-  image     String[]
-  roomType  RoomType  @default(SINGLE)
-  quantity  Int       @default(1)
-  amenities String[]
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  bookings  Booking[]
-  hotel     Hotel     @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+  id         Int      @id @default(autoincrement())
+  propertyId Int
+  price      Float
+  image      String[]
+  roomType   RoomType @default(SINGLE)
+  quantity   Int      @default(1)
+  amenities  String[]
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
-  @@index([hotelId])
-}
+  property Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  bookings Booking[]
 
-model Restaurant {
-  id          Int            @id @default(autoincrement())
-  name        String
-  description String?
-  location    String
-  timeSlots   TimeSlotType[]
-  image       String[]
-  cuisine     String[]
-  ratings     Float          @default(0.0)
-  reviews     Review[]
-  seats       Int?
-  menu        Json?
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
-  bookings    Booking[]
+  @@index([propertyId])
 }
 
 model Review {
-  id           Int         @id @default(autoincrement())
-  userId       Int
-  hotelId      Int?
-  restaurantId Int?
-  rating       Int
-  review       String?
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
-  user         User        @relation(fields: [userId], references: [id])
-  hotel        Hotel?      @relation(fields: [hotelId], references: [id])
-  Restaurant   Restaurant? @relation(fields: [restaurantId], references: [id])
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  propertyId Int
+  rating     Int
+  review     String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user     User     @relation(fields: [userId], references: [id])
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@index([propertyId])
 }
 
 model Booking {
   id           Int           @id @default(autoincrement())
+  tenantId     Int
+  propertyId   Int
   userId       Int
   roomId       Int?
-  restaurantId Int?
   bookingDate  DateTime
   totalPrice   Float
   roomQuantity Int?
@@ -137,28 +182,40 @@ model Booking {
   status       BookingStatus @default(PENDING)
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
-  restaurant   Restaurant?   @relation(fields: [restaurantId], references: [id])
-  room         Room?         @relation(fields: [roomId], references: [id])
-  user         User          @relation(fields: [userId], references: [id])
-  payment      Payment[]
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  property Property  @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  room     Room?     @relation(fields: [roomId], references: [id])
+  user     User      @relation(fields: [userId], references: [id])
+  payment  Payment[]
 
   @@index([roomId, bookingDate])
+  @@index([propertyId, bookingDate])
+  @@index([tenantId, bookingDate])
+  @@index([tenantId, status])
 }
 
 model Payment {
-  id                    Int      @id @default(autoincrement())
+  id                    Int           @id @default(autoincrement())
+  tenantId              Int
   bookingId             Int
   amount                Float
   currency              String
-  status                String
-  stripeSessionId       String   @unique
+  status                PaymentStatus
+  stripeSessionId       String        @unique
   stripePaymentIntentId String?
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
 
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   booking Booking @relation(fields: [bookingId], references: [id])
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([bookingId])
 }
 
+// Shared enums
 enum BookingStatus {
   PENDING
   CONFIRMED

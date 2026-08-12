@@ -5,10 +5,11 @@ import logger from "./utils/logger";
 
 const server = http.createServer(app);
 
-const PORT = env.PORT;
+const PORT = Number(process.env.PORT) || env.PORT || 8080;
+const HOST = "0.0.0.0";
 
-server.listen(PORT, () => {
-  logger.info(`The app listening on port ${PORT}`);
+server.listen(PORT, HOST, () => {
+  logger.info(`The app listening on ${HOST}:${PORT}`);
 });
 
 const shutdown = (signal: NodeJS.Signals) => {

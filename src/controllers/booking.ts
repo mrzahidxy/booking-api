@@ -11,6 +11,7 @@ import {
   fetchUserBookings,
   updateBookingStatus,
 } from "../services/booking.service";
+import { resolveTenantId } from "../utils/tenant-access";
 
 // Get User Bookings
 export const getUserBookings = async (req: Request, res: Response) => {
@@ -30,8 +31,9 @@ export const getUserBookings = async (req: Request, res: Response) => {
 export const getBookings = async (req: Request, res: Response) => {
   const page = parseInt(req.query.page as string) || 1;
   const limit = parseInt(req.query.limit as string) || 10;
+  const tenantId = resolveTenantId(req);
 
-  const response = await fetchBookings({ page, limit });
+  const response = await fetchBookings({ page, limit, tenantId });
   return res.status(response.statusCode).json(response);
 };
 
@@ -39,6 +41,7 @@ export const getBookings = async (req: Request, res: Response) => {
 export const bookingStatusUpdate = async (req: Request, res: Response) => {
   const { id } = req.params;
   const { status } = req.body;
+  const tenantId = resolveTenantId(req);
 
   // Validate request data
   const validationResult = bookingStatusSchema.safeParse({
@@ -55,6 +58,7 @@ export const bookingStatusUpdate = async (req: Request, res: Response) => {
   const result = await updateBookingStatus({
     bookingId: +id,
     status: validStatus,
+    tenantId,
   });
 
   // Send success response

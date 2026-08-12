@@ -52,11 +52,13 @@ export const fetchUserByIdService = async (userId: number) => {
 };
 
 export const updateUserService = async (params: { userId: number; data: Record<string, unknown> }) => {
+  const { id: _ignoredId, ...safeData } = params.data;
+
   const user = await prisma.user.update({
     where: {
       id: params.userId,
     },
-    data: params.data,
+    data: safeData,
   });
 
   return new HTTPSuccessResponse("User updated successfully", 200, user);

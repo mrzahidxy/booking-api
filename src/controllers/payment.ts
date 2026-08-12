@@ -1,11 +1,38 @@
 import { Request, Response } from 'express';
 import env from '../utils/env';
-import { createCheckoutSessionService, handleStripeWebhookEvent } from '../services/payment.service';
+import {
+    createCheckoutSessionService,
+    cancelCheckoutSessionService,
+    getCheckoutSessionService,
+    handleStripeWebhookEvent
+} from '../services/payment.service';
 export async function createCheckoutSession(req: Request, res: Response) {
-    const DOMAIN = env.FRONTEND_DOMAIN ?? 'http://localhost:3000';
+    const DOMAIN = env.FRONTEND_URL ?? 'http://localhost:3000';
+    const bookingId = Number(req.params.id);
 
-    const result = await createCheckoutSessionService(+req.params.id, DOMAIN);
+    if (!Number.isInteger(bookingId)) {
+        return res.status(400).send({ message: 'Invalid booking id' });
+    }
+
+    const result = await createCheckoutSessionService(bookingId, DOMAIN, req.user?.id);
     res.status(result.statusCode).send(result.body);
+}
+
+export async function getCheckoutSession(req: Request, res: Response) {
+    const sessionId = req.params.sessionId;
+    const result = await getCheckoutSessionService(sessionId, req.user?.id);
+    res.status(result.statusCode).send(result.body);
+}
+
+export async function cancelCheckoutSession(req: Request, res: Response) {
+    const bookingId = Number(req.params.bookingId);
+
+    if (!Number.isInteger(bookingId)) {
+        return res.status(400).send({ message: "Invalid booking id" });
+    }
+
+    const result = await cancelCheckoutSessionService(bookingId, req.user?.id);
+    return res.status(result.statusCode).send(result.body);
 }
 
 

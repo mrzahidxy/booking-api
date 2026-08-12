@@ -2,17 +2,12 @@
 import fs from 'fs';
 import path from 'path';
 import { createLogger, format, transports } from 'winston';
-import env from './env';
-
 const { combine, timestamp, printf, colorize, errors } = format;
 
 // Custom format
 const logFormat = printf(({ level, message, timestamp, stack }) => {
   return `${timestamp} ${level}: ${stack ?? message}`;
 });
-
-// Check if we're running on Vercel
-const isVercel = env.VERCEL === '1';
 
 // Setup transports array
 const loggerTransports: any[] = [];
@@ -24,20 +19,17 @@ loggerTransports.push(
   })
 );
 
-// Add File transports only if not in Vercel
-if (!isVercel) {
-  const logDir = path.resolve('logs');
+const logDir = path.resolve('logs');
 
-  // Make sure 'logs/' exists
-  if (!fs.existsSync(logDir)) {
-    fs.mkdirSync(logDir, { recursive: true });
-  }
-
-  loggerTransports.push(
-    new transports.File({ filename: path.join(logDir, 'error.log'), level: 'error' }),
-    new transports.File({ filename: path.join(logDir, 'combined.log') })
-  );
+// Make sure 'logs/' exists
+if (!fs.existsSync(logDir)) {
+  fs.mkdirSync(logDir, { recursive: true });
 }
+
+loggerTransports.push(
+  new transports.File({ filename: path.join(logDir, 'error.log'), level: 'error' }),
+  new transports.File({ filename: path.join(logDir, 'combined.log') })
+);
 
 // Create logger
 const logger = createLogger({

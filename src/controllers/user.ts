@@ -7,6 +7,8 @@ import {
 } from "../services/user.service";
 import { HTTPSuccessResponse } from "../helpers/success-response";
 import { NotFoundException } from "../exceptions/not-found";
+import { UnauthorizedException } from "../exceptions/unauthorized";
+import { ErrorCode } from "../exceptions/root";
 
 export const getUsers = async (req: Request, res: Response) => {
   const page = parseInt(req.query.page as string) || 1;
@@ -22,6 +24,30 @@ export const getUserById = async (req: Request, res: Response) => {
   const { id } = req.params;
 
   const response = await fetchUserByIdService(+id);
+
+  res.status(response.statusCode).json(response);
+};
+
+export const getCurrentUser = async (req: Request, res: Response) => {
+  const userId = req.user?.id;
+
+  if (!userId) {
+    throw new UnauthorizedException("User not authenticated", ErrorCode.NO_AUTHORIZED);
+  }
+
+  const response = await fetchUserByIdService(userId);
+
+  res.status(response.statusCode).json(response);
+};
+
+export const updateCurrentUser = async (req: Request, res: Response) => {
+  const userId = req.user?.id;
+
+  if (!userId) {
+    throw new UnauthorizedException("User not authenticated", ErrorCode.NO_AUTHORIZED);
+  }
+
+  const response = await updateUserService({ userId, data: req.body });
 
   res.status(response.statusCode).json(response);
 };
